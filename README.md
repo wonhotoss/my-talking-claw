@@ -18,6 +18,35 @@ uv run uvicorn app.server:app --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health
 ```
 
+### 음성(STT) 서비스
+
+녹음된 오디오를 텍스트로 변환하는 **독립형 온디바이스 STT 서비스**다. 에이전트 백엔드와 별개의 프로세스/포트라서 나중에 더 성능 좋은 다른 머신으로 옮길 수 있다. 첫 요청 시 Whisper 모델을 1회 내려받아 로드한다.
+
+```powershell
+cd voice
+uv sync
+uv run uvicorn app.server:app --host 0.0.0.0 --port 8100
+```
+
+상태 확인:
+
+```powershell
+curl http://localhost:8100/health
+```
+
+환경변수로 품질/성능을 조절한다.
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `WHISPER_MODEL` | `large-v3` | 대화 품질 우선 기본값. 빠른 확인은 `base`/`small`, 중간은 `medium`. |
+| `WHISPER_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
+| `WHISPER_COMPUTE_TYPE` | `int8` | GPU에서는 `float16` 권장. |
+| `WHISPER_LANGUAGE` | `ko` | 요청이 언어를 지정하지 않을 때의 기본 언어. |
+
+`large-v3`는 최초 실행 시 약 3GB를 내려받고 CPU에서는 느리다. 빠른 테스트는 `WHISPER_MODEL=base`로 실행한다.
+
+STT 서비스를 다른 머신에서 돌리려면 프론트엔드 코드를 바꾸지 않고 `frontend/vite.config.ts`의 `/voice` proxy 타깃(운영에서는 리버스 프록시)만 그 머신 주소로 바꾼다.
+
 ### 프론트엔드
 
 ```powershell
@@ -67,10 +96,11 @@ mediaDevices: no
 
 Safari에서 `SpeechRecognition: no`, `webkitSpeechRecognition: yes`, `recognition source: webkitSpeechRecognition`, `last STT error: none`으로 표시되면서 STT가 진행되면 정상이다. Safari는 표준 이름 대신 prefixed API를 노출할 수 있다.
 
-`mediaDevices`가 살아난 뒤 STT를 붙이려면 Web Speech API 대신 다음 변경이 필요하다.
+`mediaDevices`가 살아난 뒤에는 Web Speech API 대신 독립형 STT 서비스를 사용한다(day 2에서 구현).
 
-- 백엔드 STT 엔진 또는 외부 STT 서비스 연동
-- 녹음 파일 업로드와 실패/지연 처리
+- 앱이 `getUserMedia`/`MediaRecorder`로 녹음한 오디오를 `/voice/transcribe`로 업로드한다.
+- STT 서비스가 faster-whisper로 텍스트를 반환하면 기존 `/api/message` 흐름으로 이어진다.
+- Web Speech STT가 동작하는 Safari는 그대로 두고, Chrome iOS·미지원 브라우저만 이 경로를 탄다.
 
 ### iPhone Chrome
 
@@ -86,12 +116,17 @@ iPhone Chrome도 iOS의 WebKit 기반 브라우저라 Safari와 비슷한 제약
 - `stream granted`가 없으면 `getUserMedia` 권한 또는 보안 컨텍스트 단계에서 실패한 것이다.
 - `stream granted` 뒤 `마이크 트랙 종료`가 바로 나오면 브라우저가 오디오 track을 즉시 종료한 것이다.
 - `recorder stopped unexpectedly`가 나오고 `level`이 움직이면 마이크 스트림은 살아 있지만 `MediaRecorder`만 조기 종료된 것이다.
-- `level`이 움직이면 이후 외부 STT 연동은 `getUserMedia` 스트림 기반으로 진행할 수 있다.
+- `level`이 움직이면 녹음이 살아 있는 것이고, 정지 시 녹음 파일이 `/voice/transcribe`로 업로드되어 텍스트로 변환된다.
 
 ## 검증
 
 ```powershell
 cd backend
+uv run pytest
+```
+
+```powershell
+cd voice
 uv run pytest
 ```
 

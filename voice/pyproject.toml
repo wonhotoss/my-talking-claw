@@ -1,0 +1,21 @@
+[project]
+name = "my-talking-claw-voice"
+version = "0.1.0"
+description = "Standalone on-device STT service for the smartphone voice interface."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "faster-whisper>=1.1.0",
+    "python-multipart>=0.0.9",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

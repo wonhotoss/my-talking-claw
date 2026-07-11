@@ -87,6 +87,28 @@ async function send_message(text: string): Promise<message_response> {
   return response.json() as Promise<message_response>;
 }
 
+// The voice service is a separate deployable server reached through a relative
+// path so its location is controlled by the dev proxy / reverse proxy target
+// only. The browser sets the multipart boundary, so no Content-Type is set.
+async function transcribe_audio(blob: Blob): Promise<string> {
+  const form_data = new FormData();
+  form_data.append("file", blob, "recording");
+  form_data.append("language", "ko");
+
+  const response = await fetch("/voice/transcribe", {
+    method: "POST",
+    body: form_data,
+  });
+
+  if (!response.ok) {
+    throw new Error(`STT 서버 오류 ${response.status}`);
+  }
+
+  const data = (await response.json()) as { text: string };
+
+  return data.text;
+}
+
 export function app_shell() {
   const speech_support = useMemo(get_speech_support, []);
   const recognition_ref = useRef<speech_recognition | undefined>(undefined);
@@ -110,8 +132,10 @@ export function app_shell() {
   const [stt_events, set_stt_events] = useState<string[]>([]);
   const [stt_error_text, set_stt_error_text] = useState("");
   const [status_text, set_status_text] = useState("대기");
+  const [is_transcribing, set_is_transcribing] = useState(false);
 
-  const can_send = user_text.trim() !== "" && api_state !== "sending";
+  const can_send =
+    user_text.trim() !== "" && api_state !== "sending" && !is_transcribing;
   const is_listening = speech_state === "listening";
   const is_recording = mic_state === "recording";
   const is_requesting_mic = mic_state === "requesting";
@@ -168,6 +192,24 @@ export function app_shell() {
     } catch (error) {
       set_api_state("error");
       set_status_text(error instanceof Error ? error.message : "전송 실패");
+    }
+  };
+
+  const transcribe_and_submit = async (blob: Blob) => {
+    set_is_transcribing(true);
+    set_status_text("전사 중");
+    append_mic_event("전사 요청");
+
+    try {
+      const text = await transcribe_audio(blob);
+      append_mic_event(`전사 결과: ${text}`);
+      set_user_text(text);
+      await submit_text(text);
+    } catch (error) {
+      set_status_text(error instanceof Error ? error.message : "전사 실패");
+      append_mic_event("전사 실패");
+    } finally {
+      set_is_transcribing(false);
     }
   };
 
@@ -378,6 +420,11 @@ export function app_shell() {
 
         if (requested_recorder_stop_ref.current) {
           finish_microphone_test("녹음 완료", blob.size > 0 ? "ready" : "idle");
+
+          if (blob.size > 0) {
+            void transcribe_and_submit(blob);
+          }
+
           return;
         }
 
@@ -614,7 +661,12 @@ export function app_shell() {
                   ? "음성 인식 중지"
                   : "음성 인식 시작"
             }
-            disabled={api_state === "sending" || is_speaking || is_requesting_mic}
+            disabled={
+              api_state === "sending" ||
+              is_speaking ||
+              is_requesting_mic ||
+              is_transcribing
+            }
           >
             {use_microphone_button ? (
               is_recording ? (
