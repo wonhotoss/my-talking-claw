@@ -40,7 +40,7 @@ voice service (:8100)  ← 독립 배포 단위. Vite proxy 타깃만 바꾸면 
 
 ### 개발 서버
 
-- Vite proxy에 `/voice` → `http://127.0.0.1:8100`을 추가했다.
+- Vite proxy에 `/voice` → `http://127.0.0.1:8100`을 추가했다. voice 서비스는 자기 루트(`/transcribe`, `/health`)를 소유하므로, proxy에서 `/voice` 프리픽스를 `rewrite`로 벗겨서 전달한다. (에이전트 백엔드는 라우트가 `/api` 프리픽스를 포함해 별도 rewrite가 필요 없다.)
 
 ## 검증
 

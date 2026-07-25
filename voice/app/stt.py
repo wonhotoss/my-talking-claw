@@ -17,14 +17,14 @@ class stt_engine:
     Configuration comes from the environment so the service can be moved to a
     more capable machine without code changes:
 
-    - WHISPER_MODEL         (default large-v3; set small/medium for faster tests)
+    - WHISPER_MODEL         (default base; set medium/large-v3 for higher quality)
     - WHISPER_DEVICE        (default cpu; cuda on a GPU machine)
     - WHISPER_COMPUTE_TYPE  (default int8; float16 on cuda)
     - WHISPER_LANGUAGE      (default ko; fallback when a request omits language)
     """
 
     def __init__(self) -> None:
-        self.model_name = os.environ.get("WHISPER_MODEL", "large-v3")
+        self.model_name = os.environ.get("WHISPER_MODEL", "base")
         self.device = os.environ.get("WHISPER_DEVICE", "cpu")
         self.compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
         self.default_language = os.environ.get("WHISPER_LANGUAGE", "ko")

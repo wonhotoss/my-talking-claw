@@ -38,12 +38,12 @@ curl http://localhost:8100/health
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `WHISPER_MODEL` | `large-v3` | 대화 품질 우선 기본값. 빠른 확인은 `base`/`small`, 중간은 `medium`. |
+| `WHISPER_MODEL` | `base` | 가볍고 빠른 기본값. 더 높은 정확도는 `medium`, 최고는 `large-v3`. |
 | `WHISPER_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
 | `WHISPER_COMPUTE_TYPE` | `int8` | GPU에서는 `float16` 권장. |
 | `WHISPER_LANGUAGE` | `ko` | 요청이 언어를 지정하지 않을 때의 기본 언어. |
 
-`large-v3`는 최초 실행 시 약 3GB를 내려받고 CPU에서는 느리다. 빠른 테스트는 `WHISPER_MODEL=base`로 실행한다.
+`base`는 가볍고 CPU에서도 빠르다. 더 높은 정확도가 필요하면 `WHISPER_MODEL=large-v3`로 실행한다(최초 약 3GB 다운로드, CPU에서는 느림).
 
 STT 서비스를 다른 머신에서 돌리려면 프론트엔드 코드를 바꾸지 않고 `frontend/vite.config.ts`의 `/voice` proxy 타깃(운영에서는 리버스 프록시)만 그 머신 주소로 바꾼다.
 

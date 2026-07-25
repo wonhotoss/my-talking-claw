@@ -10,9 +10,13 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:8000",
       "/health": "http://127.0.0.1:8000",
-      // Standalone voice (STT) service. Change this target to move STT to
-      // another machine without touching frontend code.
-      "/voice": "http://127.0.0.1:8100",
+      // Standalone voice (STT) service. It owns its own root paths
+      // (/transcribe, /health), so the /voice mount prefix is stripped before
+      // forwarding. Change target to move STT to another machine.
+      "/voice": {
+        target: "http://127.0.0.1:8100",
+        rewrite: (path) => path.replace(/^\/voice/, ""),
+      },
     },
   },
 });
