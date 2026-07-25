@@ -18,6 +18,38 @@ uv run uvicorn app.server:app --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health
 ```
 
+백엔드는 사용자 입력을 아래 **에이전트 게이트웨이**로 위임한다. 환경변수 `AGENT_GATEWAY_URL`(기본 `http://127.0.0.1:3000`)과 `AGENT_PAIRING_CODE`(기본 `000000`)로 가리키며, 게이트웨이가 없으면 `/api/message`는 502를 반환한다.
+
+### 에이전트 게이트웨이 (스탠드인)
+
+자율형 에이전트 **nullclaw의 gateway 계약**(`POST /pair`로 6자리 코드→bearer 토큰, `POST /webhook {"message": …}`, `GET /health`)을 그대로 구현한 스탠드인 서비스다. 이 PC엔 nullclaw가 없으므로 두뇌는 **헤드리스 Claude Code**(`claude -p`)가 대신한다. 프로덕션에선 이 서비스를 실제 nullclaw로 바꾸고 백엔드의 `AGENT_GATEWAY_URL`만 그쪽으로 돌리면 된다(백엔드 코드 무변경).
+
+`claude` CLI가 필요하다(기존 Claude Code 구독 인증을 재사용, 별도 API 키 불필요). 없으면 설치한다.
+
+```powershell
+npm i -g @anthropic-ai/claude-code
+```
+
+실행한다. 게이트웨이는 claude 실행 시 중첩 표시 환경변수(`CLAUDECODE`/`CLAUDE_CODE_*`)를 벗겨 Claude Code 세션 안에서도 동작하지만, 운영은 **일반 터미널** 권장이다. 인증은 기존 claude.ai 구독 로그인을 재사용한다(종량제 API 아님).
+
+```powershell
+cd agent-gateway
+uv sync
+$env:AGENT_PAIRING_CODE="000000"
+# Windows: 실제 exe 경로 지정
+$env:CLAUDE_BIN="$env:APPDATA\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+uv run uvicorn app.server:app --host 127.0.0.1 --port 3000
+```
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AGENT_PAIRING_CODE` | `000000` | 백엔드와 공유하는 페어링 코드. |
+| `CLAUDE_BIN` | `claude` | claude 실행 파일(Linux는 PATH의 `claude`). Windows는 `.cmd`/`.ps1` 심이 아닌 실제 exe 경로로: `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe`. |
+| `CLAUDE_MODEL` | `sonnet` | 두뇌 모델(`sonnet`/`opus`/`haiku`). |
+| `CLAUDE_ALLOWED_TOOLS` | (없음) | 비우면 대화형(무툴). `Read,Glob,Grep` 등으로 자율 동작 확장. |
+| `CLAUDE_SYSTEM_PROMPT` | (음성 비서 기본) | 짧은 한국어 구어체 응답 유도. |
+| `CLAUDE_WORKDIR` | (cwd) | claude 실행 디렉터리. |
+
 ### 음성(STT) 서비스
 
 녹음된 오디오를 텍스트로 변환하는 **독립형 온디바이스 STT 서비스**다. 에이전트 백엔드와 별개의 프로세스/포트라서 나중에 더 성능 좋은 다른 머신으로 옮길 수 있다. 첫 요청 시 Whisper 모델을 1회 내려받아 로드한다.
@@ -122,6 +154,11 @@ iPhone Chrome도 iOS의 WebKit 기반 브라우저라 Safari와 비슷한 제약
 
 ```powershell
 cd backend
+uv run pytest
+```
+
+```powershell
+cd agent-gateway
 uv run pytest
 ```
 
