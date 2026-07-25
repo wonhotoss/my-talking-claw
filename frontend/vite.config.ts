@@ -17,6 +17,11 @@ export default defineConfig({
         target: "http://127.0.0.1:8100",
         rewrite: (path) => path.replace(/^\/voice/, ""),
       },
+      // Standalone TTS (text-to-speech) service — same pattern as /voice.
+      "/tts": {
+        target: "http://127.0.0.1:8200",
+        rewrite: (path) => path.replace(/^\/tts/, ""),
+      },
     },
   },
 });

@@ -1,0 +1,23 @@
+[project]
+name = "my-talking-claw-tts"
+version = "0.1.0"
+description = "Standalone on-device Korean TTS service (MeloTTS)."
+requires-python = ">=3.11"
+# The MeloTTS engine (torch, mecab-ko, unidic) is installed separately on the
+# deployment host — see the Dockerfile. It is not a locked dependency here so
+# the service code and unit tests remain installable/runnable on any platform
+# (including Windows, where mecab-ko has no wheel).
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

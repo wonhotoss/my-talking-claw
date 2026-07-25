@@ -10,11 +10,16 @@ export default defineConfig({
             "/api": "http://127.0.0.1:8000",
             "/health": "http://127.0.0.1:8000",
             // Standalone voice (STT) service. It owns its own root paths
-            // (/transcribe, /health), so the /voice mount prefix is stripped
-            // before forwarding. Change target to move STT to another machine.
+            // (/transcribe, /health), so the /voice mount prefix is stripped before
+            // forwarding. Change target to move STT to another machine.
             "/voice": {
                 target: "http://127.0.0.1:8100",
-                rewrite: (path) => path.replace(/^\/voice/, ""),
+                rewrite: function (path) { return path.replace(/^\/voice/, ""); },
+            },
+            // Standalone TTS (text-to-speech) service — same pattern as /voice.
+            "/tts": {
+                target: "http://127.0.0.1:8200",
+                rewrite: function (path) { return path.replace(/^\/tts/, ""); },
             },
         },
     },

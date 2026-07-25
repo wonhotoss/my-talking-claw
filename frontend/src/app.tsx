@@ -48,6 +48,10 @@ async function transcribe_audio(blob: Blob): Promise<string> {
     body: form_data,
   });
 
+  if (response.status === 422) {
+    throw new Error("음성이 인식되지 않았어요. 조금 또렷하게 다시 말해주세요.");
+  }
+
   if (!response.ok) {
     throw new Error(`STT 서버 오류 ${response.status}`);
   }
@@ -57,14 +61,51 @@ async function transcribe_audio(blob: Blob): Promise<string> {
   return data.text;
 }
 
+// Builds a short silent WAV blob URL, played once inside a tap gesture to
+// unlock <audio> playback on iOS (which blocks any play() that is not
+// gesture-initiated — the agent reply plays several awaits after the tap).
+function make_silent_wav_url(): string {
+  const sample_rate = 8000;
+  const num_samples = 800;
+  const buffer = new ArrayBuffer(44 + num_samples);
+  const view = new DataView(buffer);
+  const write_string = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+
+  write_string(0, "RIFF");
+  view.setUint32(4, 36 + num_samples, true);
+  write_string(8, "WAVE");
+  write_string(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sample_rate, true);
+  view.setUint32(28, sample_rate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  write_string(36, "data");
+  view.setUint32(40, num_samples, true);
+  for (let i = 0; i < num_samples; i += 1) {
+    view.setUint8(44 + i, 128);
+  }
+
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
 export function app_shell() {
   const media_stream_ref = useRef<MediaStream | undefined>(undefined);
   const media_recorder_ref = useRef<MediaRecorder | undefined>(undefined);
   const audio_chunks_ref = useRef<Blob[]>([]);
   const entry_id_ref = useRef(0);
   const timeline_end_ref = useRef<HTMLDivElement | null>(null);
-  const speech_primed_ref = useRef(false);
-  const speech_started_ref = useRef(false);
+  const audio_ref = useRef<HTMLAudioElement | null>(null);
+  const tts_url_ref = useRef<string | null>(null);
+  const silent_url_ref = useRef<string | null>(null);
+  const audio_unlocked_ref = useRef(false);
+  const audio_unlocking_ref = useRef(false);
 
   const [timeline, set_timeline] = useState<timeline_entry[]>([]);
   const [permission, set_permission] = useState<mic_permission>("pending");
@@ -91,68 +132,86 @@ export function app_shell() {
   const add_agent = (text: string) => append_entry("agent", text, "info");
 
   const stop_speaking = () => {
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+    const audio = audio_ref.current;
+
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
     }
 
     set_is_speaking(false);
   };
 
-  // iOS (WebKit, incl. Chrome iOS) ignores speechSynthesis.speak() unless the
-  // engine was first activated inside a user gesture. The agent reply is spoken
-  // several awaits after the tap, so the engine is primed here — synchronously
-  // inside the tap handler — with a silent utterance.
-  const prime_speech = () => {
-    if (speech_primed_ref.current || !("speechSynthesis" in window)) {
+  // Play a short silent clip on the real audio element, inside the tap gesture,
+  // so iOS permits the later (post-fetch) TTS playback. The element's play/end
+  // handlers are suppressed during this unlock via audio_unlocking_ref.
+  const unlock_audio = () => {
+    const audio = audio_ref.current;
+
+    if (audio === null || audio_unlocked_ref.current) {
       return;
     }
 
-    const unlock = new SpeechSynthesisUtterance(" ");
-    unlock.volume = 0;
-    window.speechSynthesis.speak(unlock);
-    speech_primed_ref.current = true;
+    if (silent_url_ref.current === null) {
+      silent_url_ref.current = make_silent_wav_url();
+    }
+
+    audio_unlocking_ref.current = true;
+    audio.src = silent_url_ref.current;
+    audio.muted = true;
+    void audio
+      .play()
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        audio.muted = false;
+        audio_unlocking_ref.current = false;
+      });
+
+    audio_unlocked_ref.current = true;
   };
 
-  const speak_text = (text: string) => {
-    if (!("speechSynthesis" in window)) {
-      log_error("이 브라우저는 TTS를 지원하지 않습니다.");
+  // TTS runs on the standalone TTS service (relative /tts, proxied), so the
+  // voice is ours and not tied to the phone's built-in speech engine.
+  const speak_text = async (text: string) => {
+    const audio = audio_ref.current;
+
+    if (audio === null) {
       return;
     }
 
-    window.speechSynthesis.cancel();
-    speech_started_ref.current = false;
+    try {
+      const response = await fetch("/tts/synthesize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      });
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "ko-KR";
-    utterance.onstart = () => {
-      speech_started_ref.current = true;
-      set_is_speaking(true);
-      log_system("재생 시작");
-    };
-    utterance.onend = () => {
-      set_is_speaking(false);
-      log_system("재생 완료");
-    };
-    utterance.onerror = (event) => {
-      set_is_speaking(false);
-      log_error(`TTS 재생 오류: ${event.error}`);
-    };
-
-    window.speechSynthesis.speak(utterance);
-
-    // Surface the silent-no-op case so the timeline shows why nothing played.
-    window.setTimeout(() => {
-      if (!speech_started_ref.current) {
-        log_error("TTS가 시작되지 않음 (iOS 제스처/오디오 세션 제약 가능성)");
+      if (!response.ok) {
+        throw new Error(`TTS 서버 오류 ${response.status}`);
       }
-    }, 1500);
+
+      const blob = await response.blob();
+
+      if (tts_url_ref.current !== null) {
+        URL.revokeObjectURL(tts_url_ref.current);
+      }
+
+      tts_url_ref.current = URL.createObjectURL(blob);
+      audio.src = tts_url_ref.current;
+      await audio.play();
+    } catch (error) {
+      set_is_speaking(false);
+      log_error(error instanceof Error ? error.message : "TTS 재생 실패");
+    }
   };
 
   const acquire_microphone = async (): Promise<MediaStream | undefined> => {
-    if (media_stream_ref.current) {
-      return media_stream_ref.current;
-    }
-
     if (!navigator.mediaDevices?.getUserMedia) {
       set_permission("denied");
       log_error("마이크를 사용할 수 없습니다. HTTPS/보안 컨텍스트를 확인하세요.");
@@ -160,18 +219,23 @@ export function app_shell() {
     }
 
     try {
+      // A fresh stream is acquired per recording and released afterwards.
+      // Holding one open across turns makes iOS mute/end the mic track once TTS
+      // audio plays (audio-session conflict), which produced empty recordings
+      // after the first couple of turns.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // The stream is kept open for the whole session so day 3 VAD can listen
-      // continuously without re-prompting.
-      media_stream_ref.current = stream;
       set_permission("granted");
-      log_system("마이크 준비됨");
       return stream;
     } catch (error) {
       set_permission("denied");
       log_error(`마이크 권한 실패: ${error instanceof Error ? error.name : "unknown"}`);
       return undefined;
     }
+  };
+
+  const release_microphone = () => {
+    media_stream_ref.current?.getTracks().forEach((track) => track.stop());
+    media_stream_ref.current = undefined;
   };
 
   const run_turn = async (blob: Blob) => {
@@ -193,7 +257,7 @@ export function app_shell() {
       add_agent(data.text);
 
       log_system("TTS 재생");
-      speak_text(data.text);
+      void speak_text(data.text);
     } catch (error) {
       log_error(error instanceof Error ? error.message : "처리 실패");
     } finally {
@@ -202,6 +266,7 @@ export function app_shell() {
   };
 
   const start_turn_recording = (stream: MediaStream) => {
+    media_stream_ref.current = stream;
     audio_chunks_ref.current = [];
 
     const recorder = new MediaRecorder(stream);
@@ -216,6 +281,9 @@ export function app_shell() {
     recorder.onstop = () => {
       const blob = new Blob(audio_chunks_ref.current, { type: recorder.mimeType });
       media_recorder_ref.current = undefined;
+      // Release the mic so the next TTS playback doesn't fight the capture
+      // session, and the next turn starts from a clean stream.
+      release_microphone();
       void run_turn(blob);
     };
 
@@ -225,13 +293,17 @@ export function app_shell() {
   };
 
   const handle_mic_click = async () => {
-    // Must run synchronously inside the tap gesture to unlock iOS TTS.
-    prime_speech();
+    // Must run synchronously inside the tap gesture to unlock iOS audio.
+    unlock_audio();
 
     if (turn === "recording") {
       media_recorder_ref.current?.stop();
       return;
     }
+
+    // Stop any TTS playback first so iOS frees the audio session before we grab
+    // the mic — otherwise the fresh stream can start muted for a moment.
+    stop_speaking();
 
     const stream = await acquire_microphone();
 
@@ -239,12 +311,20 @@ export function app_shell() {
       return;
     }
 
-    stop_speaking();
     start_turn_recording(stream);
   };
 
   useEffect(() => {
-    void acquire_microphone();
+    // Prompt for mic permission on load, then release the track. Each recording
+    // acquires its own fresh stream (permission is remembered — no re-prompt).
+    void (async () => {
+      const stream = await acquire_microphone();
+
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+        log_system("마이크 준비됨");
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -308,6 +388,35 @@ export function app_shell() {
           </span>
         </button>
       </footer>
+
+      <audio
+        ref={audio_ref}
+        hidden
+        onPlay={() => {
+          if (audio_unlocking_ref.current) {
+            return;
+          }
+
+          set_is_speaking(true);
+          log_system("재생 시작");
+        }}
+        onEnded={() => {
+          if (audio_unlocking_ref.current) {
+            return;
+          }
+
+          set_is_speaking(false);
+          log_system("재생 완료");
+        }}
+        onError={() => {
+          if (audio_unlocking_ref.current) {
+            return;
+          }
+
+          set_is_speaking(false);
+          log_error("TTS 재생 오류");
+        }}
+      />
     </main>
   );
 }

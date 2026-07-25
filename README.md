@@ -79,6 +79,63 @@ curl http://localhost:8100/health
 
 STT 서비스를 다른 머신에서 돌리려면 프론트엔드 코드를 바꾸지 않고 `frontend/vite.config.ts`의 `/voice` proxy 타깃(운영에서는 리버스 프록시)만 그 머신 주소로 바꾼다.
 
+### 음성(TTS) 서비스
+
+에이전트 응답을 음성으로 합성하는 **독립형 온디바이스 TTS 서비스**다(엔진: MeloTTS-Korean). 폰 브라우저의 내장 음성에 의존하지 않고 우리가 목소리/품질을 제어한다. MeloTTS는 torch·mecab-ko·unidic 의존성 때문에 Windows 네이티브 설치가 어려워 **Docker 컨테이너**로 돌린다(어디서든 동일 — 데스크탑/라즈베리파이/Linux).
+
+```powershell
+cd tts
+docker compose up --build
+```
+
+상태 확인:
+
+```powershell
+curl http://localhost:8200/health
+```
+
+합성 테스트(WAV 저장):
+
+```powershell
+curl -s -X POST http://localhost:8200/synthesize -H "Content-Type: application/json" --data "@sample.json" -o out.wav
+```
+
+환경변수:
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `TTS_LANGUAGE` | `KR` | MeloTTS 언어. |
+| `TTS_SPEAKER` | `KR` | 화자 키. |
+| `TTS_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
+| `TTS_SPEED` | `1.0` | 말하기 속도. |
+
+첫 합성 시 MeloTTS-Korean 모델을 내려받는다(compose 볼륨 `tts_hf_cache`에 캐시). 다른 머신으로 이전하려면 `frontend/vite.config.ts`의 `/tts` proxy 타깃만 바꾼다. 엔진 교체(예: GPU의 Chatterbox)는 `tts/app/tts_engine.py`에서 처리한다.
+
+#### Windows에서 TTS 설치·실행 가이드
+
+MeloTTS는 Windows에 네이티브로 설치되지 않는다(`mecab-ko` wheel 없음). **Docker Desktop**으로 컨테이너를 돌린다.
+
+1. Docker Desktop 설치 후 실행 → 트레이 고래 아이콘이 "running"이 될 때까지 대기.
+2. 최초 1회 이미지 빌드(수 분, torch/unidic 다운로드):
+   ```powershell
+   cd tts
+   docker compose up -d --build
+   ```
+3. 이후에는 빌드 없이:
+   ```powershell
+   docker compose up -d      # 시작
+   docker compose down       # 정지
+   docker compose logs -f    # 로그
+   ```
+4. 상태 확인: `curl http://localhost:8200/health`
+5. 첫 합성 요청 때 MeloTTS-Korean 모델을 내려받아 볼륨 `tts_hf_cache`에 캐시한다(이후 재시작에도 유지).
+
+문제 해결:
+
+- 이미지가 커서 **첫 컨테이너 생성이 느릴 수 있다**(수 분). "Creating"에 한동안 머물러도 기다린다.
+- Docker 데몬이 500/무응답으로 정체되면 **Docker Desktop 재시작**(또는 PowerShell `wsl --shutdown` 후 Docker Desktop 재실행) → `docker compose up -d`.
+- 빌드는 CPU 전용 `torch/torchaudio==2.2.2`로 고정되어 CUDA 수 GB를 받지 않는다. GPU를 쓰려면 Dockerfile의 torch 설치를 CUDA 휠로 바꾸고 `TTS_DEVICE=cuda`.
+
 ### 프론트엔드
 
 ```powershell
@@ -164,6 +221,11 @@ uv run pytest
 
 ```powershell
 cd voice
+uv run pytest
+```
+
+```powershell
+cd tts
 uv run pytest
 ```
 

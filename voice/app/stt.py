@@ -28,6 +28,10 @@ class stt_engine:
         self.device = os.environ.get("WHISPER_DEVICE", "cpu")
         self.compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
         self.default_language = os.environ.get("WHISPER_LANGUAGE", "ko")
+        # VAD off by default: it tends to drop short/quiet utterances entirely,
+        # yielding empty transcriptions (the /transcribe 422). Enable with
+        # WHISPER_VAD=true if silence hallucinations become a problem.
+        self.vad_filter = os.environ.get("WHISPER_VAD", "false").lower() == "true"
         # Loading the model is expensive, so it is cached lazily on first use.
         # This is the performance-critical exception to the no-cached-state rule.
         self._model: WhisperModel | None = None
@@ -47,7 +51,7 @@ class stt_engine:
         segments, info = self.model.transcribe(
             audio_path,
             language=language,
-            vad_filter=True,
+            vad_filter=self.vad_filter,
         )
 
         text = "".join(segment.text for segment in segments).strip()

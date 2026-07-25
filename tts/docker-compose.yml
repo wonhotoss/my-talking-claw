@@ -1,0 +1,16 @@
+services:
+  tts:
+    build: .
+    ports:
+      - "127.0.0.1:8200:8200"
+    environment:
+      TTS_LANGUAGE: KR
+      TTS_SPEAKER: KR
+      TTS_DEVICE: cpu
+      TTS_SPEED: "1.0"
+    # Persist the downloaded MeloTTS-Korean model across container restarts.
+    volumes:
+      - tts_hf_cache:/root/.cache/huggingface
+
+volumes:
+  tts_hf_cache:
