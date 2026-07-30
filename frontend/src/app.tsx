@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { createElement, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Mic, Square, Volume2, VolumeX } from "lucide-react";
+
+import { face_view } from "./face_view";
+import { pick_mood } from "./face_shapes";
+import { fetch_spoken_reply } from "./speech_track";
+import type { speech_track } from "./speech_track";
 
 type message_response = {
   text: string;
 };
+
+type layout_kind = "console" | "face";
 
 type timeline_kind = "user" | "agent" | "system";
 type timeline_level = "info" | "error";
@@ -15,7 +22,33 @@ type timeline_entry = {
   time: string;
 };
 type mic_permission = "pending" | "granted" | "denied";
-type turn_state = "idle" | "recording" | "processing";
+
+// One state for the whole turn, finer than the old idle/recording/processing.
+// "processing" hid the longest phase of all: TTS synthesis runs after run_turn
+// has already returned, so the face used to fall back to idle for the several
+// seconds it takes to make the audio.
+type activity_state =
+  | "waiting"
+  | "recording"
+  | "transcribing"
+  | "thinking"
+  | "synthesizing"
+  | "speaking";
+
+const activity_labels: Record<activity_state, string> = {
+  waiting: "대기 중",
+  recording: "듣고 있어요",
+  transcribing: "받아쓰는 중",
+  thinking: "생각하는 중",
+  synthesizing: "목소리 만드는 중",
+  speaking: "말하는 중",
+};
+
+// The mic is only locked out while a turn is mid-flight. Synthesis and playback
+// stay tappable so a reply can be cut off.
+function is_busy(activity: activity_state): boolean {
+  return activity === "transcribing" || activity === "thinking";
+}
 
 const api_base_url = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -61,6 +94,19 @@ async function transcribe_audio(blob: Blob): Promise<string> {
   return data.text;
 }
 
+// The face view lives at #/face so a Raspberry Pi can boot Chromium straight
+// into it (chromium --kiosk https://.../#/face). The hash is subscribed to
+// rather than mirrored into state — the URL is already the source of truth.
+function subscribe_hash(on_change: () => void): () => void {
+  window.addEventListener("hashchange", on_change);
+
+  return () => window.removeEventListener("hashchange", on_change);
+}
+
+function read_hash(): string {
+  return window.location.hash;
+}
+
 // Builds a short silent WAV blob URL, played once inside a tap gesture to
 // unlock <audio> playback on iOS (which blocks any play() that is not
 // gesture-initiated — the agent reply plays several awaits after the tap).
@@ -103,14 +149,16 @@ export function app_shell() {
   const timeline_end_ref = useRef<HTMLDivElement | null>(null);
   const audio_ref = useRef<HTMLAudioElement | null>(null);
   const tts_url_ref = useRef<string | null>(null);
+  // A ref, not state: the face's animation loop reads it every frame, and
+  // going through state would re-render the whole shell mid-utterance.
+  const speech_track_ref = useRef<speech_track | null>(null);
   const silent_url_ref = useRef<string | null>(null);
   const audio_unlocked_ref = useRef(false);
   const audio_unlocking_ref = useRef(false);
 
   const [timeline, set_timeline] = useState<timeline_entry[]>([]);
   const [permission, set_permission] = useState<mic_permission>("pending");
-  const [turn, set_turn] = useState<turn_state>("idle");
-  const [is_speaking, set_is_speaking] = useState(false);
+  const [activity, set_activity] = useState<activity_state>("waiting");
 
   const append_entry = (kind: timeline_kind, text: string, level: timeline_level) => {
     entry_id_ref.current += 1;
@@ -139,7 +187,8 @@ export function app_shell() {
       audio.currentTime = 0;
     }
 
-    set_is_speaking(false);
+    speech_track_ref.current = null;
+    set_activity("waiting");
   };
 
   // Play a short silent clip on the real audio element, inside the tap gesture,
@@ -183,30 +232,27 @@ export function app_shell() {
       return;
     }
 
+    // Owned here rather than in run_turn: speak_text is deliberately not
+    // awaited, so run_turn returns while the audio is still being made.
+    set_activity("synthesizing");
+
     try {
-      const response = await fetch("/tts/synthesize", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`TTS 서버 오류 ${response.status}`);
-      }
-
-      const blob = await response.blob();
+      // /speak returns the WAV together with its viseme timeline, from one
+      // synthesis — the two cannot be fetched separately because the duration
+      // predictor is stochastic and would give the face the wrong timings.
+      const spoken = await fetch_spoken_reply(text);
 
       if (tts_url_ref.current !== null) {
         URL.revokeObjectURL(tts_url_ref.current);
       }
 
-      tts_url_ref.current = URL.createObjectURL(blob);
-      audio.src = tts_url_ref.current;
+      tts_url_ref.current = spoken.audio_url;
+      speech_track_ref.current = spoken.track;
+      audio.src = spoken.audio_url;
       await audio.play();
     } catch (error) {
-      set_is_speaking(false);
+      speech_track_ref.current = null;
+      set_activity("waiting");
       log_error(error instanceof Error ? error.message : "TTS 재생 실패");
     }
   };
@@ -239,29 +285,30 @@ export function app_shell() {
   };
 
   const run_turn = async (blob: Blob) => {
-    set_turn("processing");
-
     if (blob.size === 0) {
       log_error("녹음된 오디오가 없습니다.");
-      set_turn("idle");
+      set_activity("waiting");
       return;
     }
 
     try {
+      set_activity("transcribing");
       log_system("음성 전사 요청");
       const text = await transcribe_audio(blob);
       add_user(text);
 
+      set_activity("thinking");
       log_system("에이전트 요청");
       const data = await send_message(text);
       add_agent(data.text);
 
       log_system("TTS 재생");
+      // Not awaited on purpose, so a long synthesis does not block the UI.
+      // speak_text carries the activity state from here on.
       void speak_text(data.text);
     } catch (error) {
       log_error(error instanceof Error ? error.message : "처리 실패");
-    } finally {
-      set_turn("idle");
+      set_activity("waiting");
     }
   };
 
@@ -288,7 +335,7 @@ export function app_shell() {
     };
 
     recorder.start();
-    set_turn("recording");
+    set_activity("recording");
     log_system("녹음 시작");
   };
 
@@ -296,7 +343,7 @@ export function app_shell() {
     // Must run synchronously inside the tap gesture to unlock iOS audio.
     unlock_audio();
 
-    if (turn === "recording") {
+    if (activity === "recording") {
       media_recorder_ref.current?.stop();
       return;
     }
@@ -331,63 +378,99 @@ export function app_shell() {
     timeline_end_ref.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [timeline]);
 
+  const hash = useSyncExternalStore(subscribe_hash, read_hash);
+  const layout: layout_kind = hash === "#/face" ? "face" : "console";
+  const mood = pick_mood(permission, activity);
+  const status_label =
+    permission === "denied" ? "마이크 권한이 없어요" : activity_labels[activity];
+
+  // The console body is wrapped in a single fragment so that both layouts
+  // render exactly two children, [branch, audio]. React reconciles by
+  // position: if the child count differed, the <audio> element would be
+  // destroyed and recreated on every view switch, and since audio_unlocked_ref
+  // would still say "true" it would never be unlocked again — permanently
+  // silent TTS on iOS. Do not flatten this.
   return (
-    <main className="app_shell">
-      <header className="top_bar">
-        <div>
-          <p className="eyebrow">My Talking Claw</p>
-          <h1>음성 콘솔</h1>
-        </div>
-        <div className="header_status">
-          <span
-            className={`perm_dot perm_${permission}`}
-            title={`마이크 권한: ${permission}`}
-          />
-          <div className={`speaker_lamp ${is_speaking ? "on" : ""}`}>
-            {is_speaking ? <Volume2 size={18} /> : <VolumeX size={18} />}
-            <span>{is_speaking ? "재생 중" : "대기"}</span>
-          </div>
-        </div>
-      </header>
-
-      <section className="timeline" aria-label="대화 및 로그 타임라인">
-        {timeline.length === 0 && (
-          <p className="timeline_empty">마이크 버튼을 눌러 대화를 시작하세요.</p>
-        )}
-        {timeline.map((entry) => (
-          <div key={entry.id} className={`entry entry_${entry.kind}`}>
-            {entry.kind === "system" ? (
-              <span className={`system_line ${entry.level === "error" ? "system_error" : ""}`}>
-                <span className="entry_time">{entry.time}</span>
-                <span>{entry.text}</span>
-              </span>
-            ) : (
-              <div className="bubble">
-                <span className="entry_who">
-                  {entry.kind === "user" ? "나" : "에이전트"}
-                </span>
-                <p>{entry.text}</p>
+    <main className={layout === "face" ? "face_root" : "app_shell"}>
+      {layout === "face" ? (
+        createElement(face_view, {
+          mood,
+          status_label,
+          audio_ref,
+          speech_track_ref,
+          on_tap: () => void handle_mic_click(),
+          on_exit: () => {
+            window.location.hash = "";
+          },
+        })
+      ) : (
+        <>
+          <header className="top_bar">
+            <div>
+              <p className="eyebrow">My Talking Claw</p>
+              <h1>음성 콘솔</h1>
+            </div>
+            <div className="header_status">
+              <span
+                className={`perm_dot perm_${permission}`}
+                title={`마이크 권한: ${permission}`}
+              />
+              <div className={`speaker_lamp ${activity === "speaking" ? "on" : ""}`}>
+                {activity === "speaking" ? <Volume2 size={18} /> : <VolumeX size={18} />}
+                <span>{status_label}</span>
               </div>
-            )}
-          </div>
-        ))}
-        <div ref={timeline_end_ref} />
-      </section>
+              <a className="face_link" href="#/face">
+                얼굴
+              </a>
+            </div>
+          </header>
 
-      <footer className="mic_bar">
-        <button
-          className={`mic_button ${turn === "recording" ? "recording" : ""}`}
-          type="button"
-          onClick={() => void handle_mic_click()}
-          disabled={turn === "processing"}
-          aria-label={turn === "recording" ? "녹음 정지" : "말하기 시작"}
-        >
-          {turn === "recording" ? <Square size={30} /> : <Mic size={30} />}
-          <span>
-            {turn === "recording" ? "정지" : turn === "processing" ? "처리 중" : "말하기"}
-          </span>
-        </button>
-      </footer>
+          <section className="timeline" aria-label="대화 및 로그 타임라인">
+            {timeline.length === 0 && (
+              <p className="timeline_empty">마이크 버튼을 눌러 대화를 시작하세요.</p>
+            )}
+            {timeline.map((entry) => (
+              <div key={entry.id} className={`entry entry_${entry.kind}`}>
+                {entry.kind === "system" ? (
+                  <span
+                    className={`system_line ${entry.level === "error" ? "system_error" : ""}`}
+                  >
+                    <span className="entry_time">{entry.time}</span>
+                    <span>{entry.text}</span>
+                  </span>
+                ) : (
+                  <div className="bubble">
+                    <span className="entry_who">
+                      {entry.kind === "user" ? "나" : "에이전트"}
+                    </span>
+                    <p>{entry.text}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+            <div ref={timeline_end_ref} />
+          </section>
+
+          <footer className="mic_bar">
+            <button
+              className={`mic_button ${activity === "recording" ? "recording" : ""}`}
+              type="button"
+              onClick={() => void handle_mic_click()}
+              disabled={is_busy(activity)}
+              aria-label={activity === "recording" ? "녹음 정지" : "말하기 시작"}
+            >
+              {activity === "recording" ? <Square size={30} /> : <Mic size={30} />}
+              <span>
+                {activity === "recording"
+                  ? "정지"
+                  : is_busy(activity)
+                    ? "처리 중"
+                    : "말하기"}
+              </span>
+            </button>
+          </footer>
+        </>
+      )}
 
       <audio
         ref={audio_ref}
@@ -397,7 +480,7 @@ export function app_shell() {
             return;
           }
 
-          set_is_speaking(true);
+          set_activity("speaking");
           log_system("재생 시작");
         }}
         onEnded={() => {
@@ -405,7 +488,7 @@ export function app_shell() {
             return;
           }
 
-          set_is_speaking(false);
+          set_activity("waiting");
           log_system("재생 완료");
         }}
         onError={() => {
@@ -413,7 +496,7 @@ export function app_shell() {
             return;
           }
 
-          set_is_speaking(false);
+          set_activity("waiting");
           log_error("TTS 재생 오류");
         }}
       />

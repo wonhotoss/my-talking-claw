@@ -100,14 +100,51 @@ curl http://localhost:8200/health
 curl -s -X POST http://localhost:8200/synthesize -H "Content-Type: application/json" --data "@sample.json" -o out.wav
 ```
 
+립싱크용 합성(오디오 + viseme 타임라인, JSON 저장):
+
+```powershell
+curl -s -X POST http://localhost:8200/speak -H "Content-Type: application/json" --data "@sample.json" -o speak.json
+```
+
+`POST /speak`는 `POST /synthesize`와 같은 오디오에 **입모양 타임라인**을 얹어 돌려준다.
+
+```json
+{
+  "audio_base64": "<WAV bytes, base64>",
+  "media_type": "audio/wav",
+  "sample_rate": 44100,
+  "duration": 6.75,
+  "visemes": [{ "start": 0.0, "end": 0.083, "viseme": "x" }],
+  "segments": [{ "start": 0.0, "end": 2.1, "text": "안녕하세요." }],
+  "envelope": [0.0, 0.12, 0.31],
+  "envelope_hz": 50
+}
+```
+
+- `viseme`는 `a e i o u m n x` 중 하나(`m` 다문 입/양순음, `n` 중립 자음, `x` 무음). 구간은
+  연속이고 마지막 `end`가 `duration`과 같다.
+- `segments`는 MeloTTS가 실제로 한 번에 합성한 문장 조각과 그 오디오 구간이다(얼굴 자막용).
+  조각 경계는 실측이지만 조각이 길 수 있어(최소 길이만 있고 최대가 없다) 프론트가 표시용으로
+  문장 단위로 다시 쪼갠다.
+- `envelope`는 0..1로 정규화한 RMS 크기. 입 벌림 정도와 자막 스윕 가중치에 쓴다.
+- 오디오와 타임라인은 **반드시 한 번의 합성에서 같이** 나와야 한다. MeloTTS의 duration
+  predictor는 확률적(`noise_scale_w`)이라, 따로 두 번 호출하면 음소 길이가 달라져 타임라인이
+  오디오와 어긋난다. WAV가 base64로 같이 실려 오는 이유다(+33%, LAN에선 수십 ms).
+
 환경변수:
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `TTS_LANGUAGE` | `KR` | MeloTTS 언어. |
+| `TTS_LANGUAGE` | `KR` | MeloTTS 언어. viseme 표는 한국어 전용이다. |
 | `TTS_SPEAKER` | `KR` | 화자 키. |
 | `TTS_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
 | `TTS_SPEED` | `1.0` | 말하기 속도. |
+| `TTS_VISEME_MIN_SECONDS` | `0.04` | 이보다 짧은 viseme 구간은 이웃에 흡수(깜빡임 방지). |
+| `TTS_ENVELOPE_HZ` | `50` | 초당 RMS 크기 샘플 수. |
+
+MeloTTS는 **커밋 SHA로 고정**되어 있다(`Dockerfile`의 `melotts_commit`). viseme 타임라인이
+`SynthesizerTrn.infer`의 어텐션 출력이라는 내부 구현에 의존하므로, 올릴 때는 의도적으로 올리고
+`tts/tests` + 실제 `/speak` 호출을 다시 확인한다.
 
 첫 합성 시 MeloTTS-Korean 모델을 내려받는다(compose 볼륨 `tts_hf_cache`에 캐시). 다른 머신으로 이전하려면 `frontend/vite.config.ts`의 `/tts` proxy 타깃만 바꾼다. 엔진 교체(예: GPU의 Chatterbox)는 `tts/app/tts_engine.py`에서 처리한다.
 
@@ -160,6 +197,32 @@ https://<desktop-lan-ip>:5173
 $env:VITE_API_BASE_URL="https://<backend-origin>"
 npm run dev
 ```
+
+### 얼굴 화면 (`#/face`)
+
+에이전트가 말할 때 음성에 맞춰 입이 움직이는 풀스크린 얼굴이다. 상단바의 **얼굴** 버튼으로
+열거나 URL로 직접 들어간다.
+
+```text
+https://<desktop-lan-ip>:5173/#/face
+```
+
+해시 라우트인 이유는 최종 배포 형태가 **자체 모니터를 단 라즈베리 파이**라서다. 키오스크로
+바로 부팅할 수 있다.
+
+```bash
+chromium --kiosk --ignore-certificate-errors https://<host>:5173/#/face
+```
+
+화면 아무 데나 누르면 녹음이 시작/정지된다(마이크 버튼과 동일 동작). 오른쪽 위의 **콘솔**
+버튼으로 돌아온다.
+
+표정은 대기 / 듣는 중 / 생각 중 / 말하는 중 / 마이크 거부의 다섯 가지이고, 말하는 중에는
+`/tts/speak`가 준 viseme 타임라인을 따라 입모양이 바뀐다.
+
+입 아래에는 현재 상태가 표시된다 — 대기 중 / 듣고 있어요 / 받아쓰는 중 / 생각하는 중 /
+목소리 만드는 중. 말할 때는 같은 자리에 말하는 문장이 **노래방 자막**처럼 뜨고, 실제 발화
+속도에 맞춰 하이라이트가 쓸려간다.
 
 ## STT 미지원 확인
 

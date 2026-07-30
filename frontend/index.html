@@ -2,7 +2,13 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover so the full-screen face reaches the edges, and so
+         env(safe-area-inset-*) resolves to non-zero on notched phones (the
+         .mic_bar already relies on it and was silently getting 0). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>My Talking Claw</title>
   </head>
   <body>

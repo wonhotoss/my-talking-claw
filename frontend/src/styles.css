@@ -244,6 +244,17 @@ h1 {
   }
 }
 
+.face_link {
+  padding: 6px 10px;
+  border: 1px solid #cbd7d2;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #517166;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 @media (min-width: 680px) {
   h1 {
     font-size: 1.6rem;
@@ -251,5 +262,240 @@ h1 {
 
   .timeline {
     padding: 20px 24px;
+  }
+}
+
+/* ---- face view --------------------------------------------------------- */
+/* Dark on purpose: this screen is meant to stay lit on the Pi's monitor, so
+   it should not glare, and the dot-and-line face reads best at high contrast.
+   The console keeps the light palette. */
+
+.face_root {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #10171c;
+}
+
+.face_stage_wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.face_stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  background: transparent;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.face_svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.face_ink {
+  fill: #7fd6c4;
+  stroke: #7fd6c4;
+}
+
+.face_mouth {
+  stroke-width: 10;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.face_brow_left,
+.face_brow_right {
+  fill: none;
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+.face_cheek {
+  fill: #7fd6c4;
+  opacity: 0.16;
+}
+
+.face_denied .face_ink {
+  fill: #e0705f;
+  stroke: #e0705f;
+}
+
+.face_exit {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid rgba(127, 214, 196, 0.3);
+  border-radius: 999px;
+  background: rgba(127, 214, 196, 0.08);
+  color: #7fd6c4;
+  font-size: 0.78rem;
+  font-weight: 700;
+  opacity: 0.55;
+  transition: opacity 160ms ease-out;
+}
+
+.face_exit:hover,
+.face_exit:focus-visible {
+  opacity: 1;
+}
+
+/* ---- caption: system status, or karaoke subtitles while speaking -------- */
+/* Sits where the thinking dots used to be. pointer-events: none so a tap
+   anywhere still reaches the face button underneath. */
+.face_caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(7vh + env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: center;
+  padding: 0 6vw;
+  pointer-events: none;
+}
+
+.face_status {
+  margin: 0;
+  color: #4d6b74;
+  font-size: clamp(0.95rem, 2.6vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* nowrap is load-bearing: the karaoke highlight is a right-hand clip, so a
+   wrapped caption would sweep both rows at the same time. The character limit
+   in speech_track.ts and this font size are sized together so 18 full-width
+   Korean glyphs fit the padded stage on a phone. */
+.face_subtitle {
+  position: relative;
+  margin: 0;
+  font-size: clamp(0.95rem, 4vw, 1.7rem);
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.face_subtitle_base {
+  color: #3d5a63;
+}
+
+/* The spoken-so-far layer, stacked exactly on top of the base and clipped from
+   the right by the animation loop. Both layers hold identical text, so they
+   wrap identically and the clip lands on the correct glyph. */
+.face_subtitle_fill {
+  position: absolute;
+  inset: 0;
+  color: #b9f0e2;
+  clip-path: inset(0 100% 0 0);
+}
+
+/* transform-box/origin are required on SVG elements, otherwise Chromium
+   resolves transform-origin against the whole viewBox and the brows swing
+   around the face centre. CSS must never transform a node the animation loop
+   writes to — a CSS transform silently wins over the SVG attribute. */
+.face_brows,
+.face_eyes,
+.face_brow_left,
+.face_brow_right,
+.face_ring {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.face_brows,
+.face_eyes,
+.face_brow_left,
+.face_brow_right {
+  transition: transform 220ms ease-out;
+}
+
+.face_listening .face_brows {
+  transform: translateY(-10px);
+}
+
+.face_listening .face_eyes {
+  transform: scale(1.12);
+}
+
+.face_thinking .face_brow_right {
+  transform: translate(0, -14px) rotate(-8deg);
+}
+
+.face_denied .face_brows {
+  transform: translateY(6px);
+}
+
+.face_denied .face_brow_left {
+  transform: rotate(14deg);
+}
+
+.face_denied .face_brow_right {
+  transform: rotate(-14deg);
+}
+
+.face_ring {
+  fill: none;
+  stroke: #2c7be5;
+  stroke-width: 6;
+  opacity: 0;
+}
+
+.face_listening .face_ring {
+  animation: face_ring_pulse 1.4s ease-out infinite;
+}
+
+@keyframes face_ring_pulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
+
+/* Breathing is a composited transform on the <svg> itself, so it costs no
+   raster work. Doing it as a per-frame SVG attribute write would force the
+   whole face to re-rasterise every frame — the worst thing you can do on a Pi. */
+@keyframes face_breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.006);
+  }
+}
+
+.face_svg {
+  animation: face_breathe 4.2s ease-in-out infinite;
+}
+
+/* Lip-sync itself stays on: it is functional (it says the device is talking),
+   not decoration. Only the ambient motion is suppressed. */
+@media (prefers-reduced-motion: reduce) {
+  .mic_button.recording,
+  .face_svg,
+  .face_listening .face_ring {
+    animation: none;
+  }
+
+  .face_brows,
+  .face_eyes,
+  .face_brow_left,
+  .face_brow_right {
+    transition: none;
   }
 }

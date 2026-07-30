@@ -13,8 +13,18 @@ RUN apt-get update \
 RUN pip install --no-cache-dir torch==2.2.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu
 
 # MeloTTS + Korean g2p (mecab-ko) + unidic dictionary.
+#
+# Pinned to a commit: app/tts_engine.py reads SynthesizerTrn.infer's attention
+# output to build the viseme timeline, and that is an internal contract with no
+# stability promise. Bump deliberately, then re-run tts/tests and one real
+# /speak call. (--depth 1 cannot check out an arbitrary SHA, so fetch it.)
+ARG melotts_commit=209145371cff8fc3bd60d7be902ea69cbdb7965a
+
 RUN printf "torch==2.2.2\ntorchaudio==2.2.2\n" > /tmp/constraints.txt \
- && git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git /opt/melotts \
+ && git init -q /opt/melotts \
+ && git -C /opt/melotts remote add origin https://github.com/myshell-ai/MeloTTS.git \
+ && git -C /opt/melotts fetch -q --depth 1 origin ${melotts_commit} \
+ && git -C /opt/melotts checkout -q FETCH_HEAD \
  && PIP_CONSTRAINT=/tmp/constraints.txt pip install --no-cache-dir -e /opt/melotts \
  && python -m unidic download \
  && pip install --no-cache-dir python-mecab-ko
@@ -29,7 +39,9 @@ ENV TTS_ENGINE=melotts \
     TTS_LANGUAGE=KR \
     TTS_SPEAKER=KR \
     TTS_DEVICE=cpu \
-    TTS_SPEED=1.0
+    TTS_SPEED=1.0 \
+    TTS_VISEME_MIN_SECONDS=0.04 \
+    TTS_ENVELOPE_HZ=50
 
 EXPOSE 8200
 CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8200"]

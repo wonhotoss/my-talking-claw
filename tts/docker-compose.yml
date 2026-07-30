@@ -8,6 +8,10 @@ services:
       TTS_SPEAKER: KR
       TTS_DEVICE: cpu
       TTS_SPEED: "1.0"
+      # Viseme spans shorter than this are absorbed into a neighbour so the
+      # mouth does not flicker; the alignment quantum is ~11.6ms.
+      TTS_VISEME_MIN_SECONDS: "0.04"
+      TTS_ENVELOPE_HZ: "50"
     # Persist the downloaded MeloTTS-Korean model across container restarts.
     volumes:
       - tts_hf_cache:/root/.cache/huggingface

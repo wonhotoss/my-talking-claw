@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/speech.d.ts","./src/vite-env.d.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/face_shapes.ts","./src/face_view.tsx","./src/main.tsx","./src/speech_track.ts","./src/vite-env.d.ts"],"version":"5.9.3"}
