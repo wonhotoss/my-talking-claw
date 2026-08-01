@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.tts_engine import tts_engine
+from app.engines import engine_for_environment
 
 
 class synthesize_request(BaseModel):
@@ -58,7 +58,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = tts_engine()
+engine = engine_for_environment()
 
 
 @app.get("/health", response_model=health_response)

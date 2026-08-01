@@ -11,8 +11,13 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     # Only the RMS envelope in app/viseme.py needs this. Kept <2 to match the
-    # torch 2.2.2 pin in the Dockerfile, where numpy already comes via torch.
+    # torch 2.2.2 pin in Dockerfile.melo, where numpy already comes via torch.
     "numpy>=1.26,<2",
+    # app/speech.py writes the WAV with it. Unlike the engines this is not
+    # platform-hostile - the wheel bundles libsndfile everywhere, including
+    # Windows - so it stays a locked dependency and the timeline tests can run
+    # end to end on the dev box.
+    "soundfile>=0.12",
 ]
 
 [dependency-groups]

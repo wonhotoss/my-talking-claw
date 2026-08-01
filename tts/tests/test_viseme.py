@@ -17,19 +17,48 @@ korean_inventory = (
 )
 
 
+# Every symbol espeak-ng emitted for Korean over a corpus covering all 21
+# jungseong, both glide series, the coda inventory, digits, an English loanword
+# and every sentence-final punctuation mark - plus the BOS/EOS brackets and PAD
+# that PiperVoice adds around each sentence's alignment. Measured, not guessed;
+# see platform-notes.md. Same role as korean_inventory above: resolve_visemes
+# never raises, so this list is where the coverage guarantee lives.
+ipa_inventory = (
+    list("ɐʌəɛeiɪɯoɔuʊ")
+    + list("pbm")
+    + list("tdnshkɡqŋɾlɫrɕʑʃjw")
+    + ["ˈ", "ˌ", "ː", "ʲ", "-"]
+    + ["^", "$", "_", " ", ".", ",", "?", "!"]
+)
+
+
 def resolve(symbols: list[str]) -> list[str]:
-    return viseme.resolve_visemes(symbols, frozenset())
+    return viseme.resolve_visemes(symbols, frozenset(), viseme.korean_jamo)
+
+
+def resolve_ipa(symbols: list[str]) -> list[str]:
+    return viseme.resolve_visemes(symbols, frozenset(), viseme.korean_ipa)
+
+
+def covered(table: viseme.symbol_table) -> set[str]:
+    return set(table.vowels) | table.closed | table.silence | table.transparent
 
 
 def test_korean_inventory_is_fully_covered() -> None:
-    tables = (
-        set(viseme.vowel_visemes)
-        | viseme.closed_symbols
-        | viseme.silence_symbols
-        | viseme.transparent_symbols
-    )
+    assert set(korean_inventory) <= covered(viseme.korean_jamo)
 
-    assert set(korean_inventory) <= tables
+
+def test_ipa_inventory_is_fully_covered() -> None:
+    assert set(ipa_inventory) <= covered(viseme.korean_ipa)
+
+
+@pytest.mark.parametrize("table", [viseme.korean_jamo, viseme.korean_ipa])
+def test_tables_do_not_classify_a_symbol_twice(table: viseme.symbol_table) -> None:
+    groups = [set(table.vowels), table.closed, table.silence, table.transparent]
+
+    for index, group in enumerate(groups):
+        for other in groups[index + 1 :]:
+            assert group & other == set()
 
 
 @pytest.mark.parametrize(
@@ -86,13 +115,72 @@ def test_no_vowel_falls_back_to_neutral() -> None:
     assert resolve(["ᄂ", "ᄉ"]) == ["n", "n"]
 
 
+# --- espeak-ng IPA (Piper) --------------------------------------------------
+#
+# The phoneme sequences below are what ko_KR-kss-medium actually emits; they
+# were read off voice.phonemize(), not constructed by hand.
+
+
+@pytest.mark.parametrize(
+    "symbol,expected",
+    [
+        ("ɐ", "a"),
+        ("ʌ", "a"),
+        ("ə", "a"),
+        ("ɛ", "e"),
+        ("e", "e"),
+        ("i", "i"),
+        ("ɯ", "i"),
+        ("ɪ", "i"),
+        ("o", "o"),
+        ("ɔ", "o"),
+        ("u", "u"),
+        ("ʊ", "u"),
+    ],
+)
+def test_ipa_vowels_map_by_lip_shape(symbol: str, expected: str) -> None:
+    assert resolve_ipa([symbol]) == [expected]
+
+
+def test_ipa_bilabials_close_the_mouth() -> None:
+    # 밥 -> p ˈ ɐ p. Onset and coda both shut the lips; the stress mark between
+    # them takes the vowel.
+    assert resolve_ipa(["p", "ˈ", "ɐ", "p"]) == ["m", "a", "a", "m"]
+
+
+def test_ipa_segment_separator_does_not_rest_the_mouth() -> None:
+    # 했습 -> h ɛ t - s - ˌ ɯ p. "-" separates segments *inside* a word here, so
+    # treating it as a pause (which it is in the jamo table) would open a
+    # rest-mouth gap mid-word. Nothing in this sequence may resolve to silence.
+    resolved = resolve_ipa(["h", "ɛ", "t", "-", "s", "-", "ˌ", "ɯ", "p"])
+
+    assert resolved == ["e", "e", "e", "e", "i", "i", "i", "i", "m"]
+    assert viseme.viseme_silence not in resolved
+
+
+def test_ipa_glide_takes_the_nucleus() -> None:
+    # 확 -> h w ɐ q. The w onglide is short; rounding the lips for it would
+    # leave the wrong posture for the audible majority of the syllable.
+    assert resolve_ipa(["h", "w", "ɐ", "q"]) == ["a", "a", "a", "a"]
+
+
+def test_ipa_sentence_brackets_are_silence() -> None:
+    # PiperVoice wraps every sentence's alignment in BOS/EOS.
+    assert resolve_ipa(["^", "n", "ˈ", "e", ".", "$"]) == ["x", "e", "e", "e", "x", "x"]
+
+
+def test_ipa_unmapped_symbol_is_transparent_not_fatal() -> None:
+    # espeak can emit segments the measured inventory never reached.
+    assert resolve_ipa(["t͈", "ɐ"]) == ["a", "a"]
+
+
 def test_blanks_inherit_their_neighbours() -> None:
     # 하, fully interspersed the way add_blank does it: blanks at even indices.
     # Blank id 0 decodes to "_", so they can only be told apart by position.
     symbols = ["_", "_", "_", "ᄒ", "_", "ᅡ", "_", "_", "_"]
     blanks = frozenset(range(0, len(symbols), 2))
 
-    assert viseme.resolve_visemes(symbols, blanks) == [
+    assert viseme.resolve_visemes(symbols, blanks, viseme.korean_jamo) == [
         "x",
         "x",
         "a",
@@ -105,8 +193,10 @@ def test_blanks_inherit_their_neighbours() -> None:
     ]
 
 
-def test_build_spans_is_contiguous_and_frame_aligned() -> None:
-    spans = viseme.build_spans(["ᄀ", "ᅡ", "ᆷ"], [2, 5, 3], frozenset(), 0.01, 1.0)
+def test_build_spans_is_contiguous_and_sample_aligned() -> None:
+    spans = viseme.build_spans(
+        ["ᄀ", "ᅡ", "ᆷ"], [2, 5, 3], frozenset(), 100, 1.0, viseme.korean_jamo
+    )
 
     assert [span.viseme for span in spans] == ["a", "a", "m"]
     assert spans[0].start == 1.0
@@ -117,7 +207,7 @@ def test_build_spans_is_contiguous_and_frame_aligned() -> None:
 
 def test_build_spans_rejects_a_length_mismatch() -> None:
     with pytest.raises(ValueError):
-        viseme.build_spans(["ᅡ"], [1, 1], frozenset(), 0.01, 0.0)
+        viseme.build_spans(["ᅡ"], [1, 1], frozenset(), 100, 0.0, viseme.korean_jamo)
 
 
 def test_merge_collapses_runs_and_absorbs_flicker() -> None:

@@ -1,11 +1,17 @@
-"""Pure jamo -> viseme mapping and speech timeline shaping.
+"""Pure symbol -> viseme mapping and speech timeline shaping.
 
-Deliberately free of torch and melo so it imports (and unit-tests) on any host,
-including the Windows dev box. numpy is used only for the RMS envelope.
+Deliberately free of torch, melo and piper so it imports (and unit-tests) on any
+host, including the Windows dev box. numpy is used only for the RMS envelope.
 
 A viseme is a visible lip posture, not a phoneme: only aperture, rounding and
 spread are observable. Tongue position is not, which is why several distinct
 Korean vowels share one viseme.
+
+The shaping algorithm is engine-agnostic; only the symbol tables are not. Each
+engine phonemises differently - MeloTTS emits Korean jamo, Piper emits espeak-ng
+IPA - so a `symbol_table` is passed in rather than read from module state. Both
+Korean tables live here, next to the lip-shape reasoning they encode, because
+they are pure data with no engine imports.
 """
 
 from dataclasses import dataclass
@@ -19,11 +25,28 @@ viseme_neutral = "n"
 viseme_closed = "m"
 
 
+@dataclass(frozen=True)
+class symbol_table:
+    """One engine's phoneme symbols, grouped by how the lips behave.
+
+    `transparent` is not consulted at resolve time - anything outside all four
+    sets behaves identically (see resolve_visemes). It exists so the
+    inventory-coverage tests are meaningful and so the intent is recorded.
+    """
+
+    vowels: dict[str, str]
+    closed: frozenset[str]
+    silence: frozenset[str]
+    transparent: frozenset[str]
+
+
+# --- MeloTTS: Korean jamo ---------------------------------------------------
+
 # Korean jungseong, U+1161..U+1175. Diphthongs and y/w-glides take their
 # nucleus: the onglide is short and the nucleus holds the shape for most of the
 # token, so rendering the glide would leave the mouth in the wrong posture for
 # the audible majority of the vowel.
-vowel_visemes = {
+jamo_vowels = {
     "ᅡ": "a",  # /a/   open, unrounded
     "ᅢ": "e",  # /ɛ/   mid, spread (merged with ᅦ in Seoul Korean)
     "ᅣ": "a",  # /ja/
@@ -52,11 +75,11 @@ vowel_visemes = {
 # Lips shut regardless of the surrounding vowels: the four labial onsets, plus
 # the two labial codas that survive MeloTTS's coda neutralisation (ᆸ already
 # covers final ㅍ).
-closed_symbols = frozenset({"ᄆ", "ᄇ", "ᄈ", "ᄑ", "ᆷ", "ᆸ"})
+jamo_closed = frozenset({"ᄆ", "ᄇ", "ᄈ", "ᄑ", "ᆷ", "ᆸ"})
 
 # Genuinely mouth-at-rest: pad/blank, the explicit pause token, and the
 # punctuation and bracket literals that reach the model as raw text.
-silence_symbols = frozenset(
+jamo_silence = frozenset(
     {
         "_",
         "SP",
@@ -83,11 +106,9 @@ silence_symbols = frozenset(
 )
 
 # No visible labial gesture of their own, so they borrow the nearest vowel's
-# shape. Anything outside every table behaves identically (see resolve_visemes)
-# - this set exists so the inventory-coverage test is meaningful and so the
-# intent is recorded. "~" is a Korean chat lengthener and must not close the
-# mouth mid-word on 안녕~.
-transparent_symbols = frozenset(
+# shape. "~" is a Korean chat lengthener and must not close the mouth mid-word
+# on 안녕~.
+jamo_transparent = frozenset(
     {
         "ᄀ",
         "ᄁ",
@@ -113,6 +134,93 @@ transparent_symbols = frozenset(
         "~",
         "UNK",
     }
+)
+
+korean_jamo = symbol_table(
+    vowels=jamo_vowels,
+    closed=jamo_closed,
+    silence=jamo_silence,
+    transparent=jamo_transparent,
+)
+
+
+# --- Piper: espeak-ng IPA ---------------------------------------------------
+#
+# espeak-ng transcribes Korean into IPA rather than jamo, so the keys change but
+# the reasoning does not: the same lip-shape criteria, applied to IPA symbols.
+# The inventory below was measured from the ko_KR-kss-medium voice over a corpus
+# covering every jamo, both glide series and the coda inventory - see the
+# coverage test. espeak can emit symbols beyond it (tense-consonant modifiers,
+# loanword segments), which stay transparent by the same rule as MeloTTS's
+# multilingual symbol union.
+ipa_vowels = {
+    "ɐ": "a",  # ㅏ  near-open central, unrounded
+    "ʌ": "a",  # ㅓ  mid-open, unrounded -> shares the open unrounded shape
+    "ə": "a",  # reduced central vowel; nearest neighbour of ʌ
+    "ɛ": "e",  # ㅐ  mid, spread (merged with ㅔ in Seoul Korean)
+    "e": "e",  # ㅔ  mid, spread
+    "i": "i",  # ㅣ  close, spread
+    "ɪ": "i",  # lax front, spread
+    "ɯ": "i",  # ㅡ  close and UNROUNDED - the same trap as jamo ᅳ. Mapping it
+    #             to "u" purses the lips on every 은/는/를.
+    "o": "o",  # ㅗ  mid-close, rounded
+    "ɔ": "o",  # open-mid back, rounded
+    "u": "u",  # ㅜ  close, rounded and protruded
+    "ʊ": "u",  # lax back, rounded
+}
+
+# ㅂ ㅃ ㅍ and coda ㅂ all surface as p/b, and ㅁ as m. espeak does not mark
+# aspiration or tenseness separately here, so these three cover every bilabial.
+ipa_closed = frozenset({"p", "b", "m"})
+
+# BOS/EOS bracket every sentence in the alignment (piper prepends ^ and appends
+# $), PAD is _, and the space is a word gap. The sentence-final punctuation
+# carries real duration and is a genuine pause.
+#
+# "-" is deliberately NOT here. In espeak-ng Korean it separates segments inside
+# a word (했습 -> t - s -, 학교 -> k -), so resting the mouth on it would open a
+# gap mid-word. It is transparent instead - the same call as "~" in the jamo
+# table, for the same reason.
+ipa_silence = frozenset({"^", "$", "_", " ", ".", ",", "?", "!", "…", ";", ":"})
+
+# No visible labial gesture of their own. Includes the glides: j and w take the
+# nucleus that follows them, matching the jamo table's treatment of ㅑ/ㅘ - the
+# onglide is short and the nucleus holds the shape for most of the syllable.
+# The stress and length marks (ˈ ˌ ː ʲ) carry duration of their own and precede
+# or extend their segment, so they inherit it by the same nearest-vowel rule.
+ipa_transparent = frozenset(
+    {
+        "t",
+        "d",
+        "n",
+        "s",
+        "h",
+        "k",
+        "ɡ",
+        "q",  # unreleased coda stop (확 -> h w ɐ q)
+        "ŋ",
+        "ɾ",
+        "l",
+        "ɫ",
+        "r",
+        "ɕ",
+        "ʑ",
+        "ʃ",
+        "j",
+        "w",
+        "ˈ",
+        "ˌ",
+        "ː",
+        "ʲ",
+        "-",
+    }
+)
+
+korean_ipa = symbol_table(
+    vowels=ipa_vowels,
+    closed=ipa_closed,
+    silence=ipa_silence,
+    transparent=ipa_transparent,
 )
 
 
@@ -166,7 +274,9 @@ def nearest_source(flags: list[bool]) -> list[int | None]:
     return [pick(index) for index in range(count)]
 
 
-def resolve_visemes(symbols: list[str], blank_indices: frozenset[int]) -> list[str]:
+def resolve_visemes(
+    symbols: list[str], blank_indices: frozenset[int], table: symbol_table
+) -> list[str]:
     """Map model tokens to visemes.
 
     Two passes of the same nearest-neighbour rule:
@@ -178,30 +288,32 @@ def resolve_visemes(symbols: list[str], blank_indices: frozenset[int]) -> list[s
     Blanks are identified by index, never by symbol: blank id 0 decodes to "_",
     which is indistinguishable from the real leading/trailing pad tokens.
 
-    An unmapped symbol is treated as transparent rather than raising. The model
-    carries a multilingual symbol union, and the timeline is a cosmetic overlay
-    - failing a whole utterance over one unknown mouth shape would be the worse
-    outcome. Coverage of the Korean inventory is pinned by a test instead.
+    An unmapped symbol is treated as transparent rather than raising. Both
+    engines can emit symbols outside their measured inventory (MeloTTS carries a
+    multilingual symbol union; espeak-ng has segments Korean text rarely
+    reaches), and the timeline is a cosmetic overlay - failing a whole utterance
+    over one unknown mouth shape would be the worse outcome. Coverage of the
+    Korean inventory is pinned by a test instead.
     """
     is_vowel = [
-        index not in blank_indices and symbol in vowel_visemes
+        index not in blank_indices and symbol in table.vowels
         for index, symbol in enumerate(symbols)
     ]
     vowel_source = nearest_source(is_vowel)
 
     def resolve(index: int, symbol: str) -> str:
-        if symbol in vowel_visemes:
-            return vowel_visemes[symbol]
+        if symbol in table.vowels:
+            return table.vowels[symbol]
 
-        if symbol in closed_symbols:
+        if symbol in table.closed:
             return viseme_closed
 
-        if symbol in silence_symbols:
+        if symbol in table.silence:
             return viseme_silence
 
         source = vowel_source[index]
 
-        return viseme_neutral if source is None else vowel_visemes[symbols[source]]
+        return viseme_neutral if source is None else table.vowels[symbols[source]]
 
     resolved: list[str | None] = [
         None if index in blank_indices else resolve(index, symbol)
@@ -222,28 +334,31 @@ def resolve_visemes(symbols: list[str], blank_indices: frozenset[int]) -> list[s
 
 def build_spans(
     symbols: list[str],
-    frame_counts: list[int],
+    sample_counts: list[int],
     blank_indices: frozenset[int],
-    seconds_per_frame: float,
+    sample_rate: int,
     offset_seconds: float,
+    table: symbol_table,
 ) -> list[viseme_span]:
     """One span per model token, contiguous, offset into the global timeline.
 
-    Boundaries are derived from a cumulative *frame* count and multiplied once,
-    so there is no float drift across a long utterance.
+    Boundaries come from a cumulative *sample* count divided once by the sample
+    rate, so there is no float drift across a long utterance. Samples are the
+    common unit both engines can produce exactly: Piper reports them directly,
+    and MeloTTS's mel frames convert by an integer upsampling factor.
     """
-    if len(symbols) != len(frame_counts):
+    if len(symbols) != len(sample_counts):
         raise ValueError(
-            f"symbol/frame count mismatch: {len(symbols)} vs {len(frame_counts)}"
+            f"symbol/sample count mismatch: {len(symbols)} vs {len(sample_counts)}"
         )
 
-    visemes = resolve_visemes(symbols, blank_indices)
-    boundaries = list(accumulate(frame_counts, initial=0))
+    visemes = resolve_visemes(symbols, blank_indices, table)
+    boundaries = list(accumulate(sample_counts, initial=0))
 
     return [
         viseme_span(
-            start=offset_seconds + boundaries[index] * seconds_per_frame,
-            end=offset_seconds + boundaries[index + 1] * seconds_per_frame,
+            start=offset_seconds + boundaries[index] / sample_rate,
+            end=offset_seconds + boundaries[index + 1] / sample_rate,
             viseme=visemes[index],
         )
         for index in range(len(symbols))
@@ -253,10 +368,11 @@ def build_spans(
 def snap_contiguous(spans: list[viseme_span]) -> list[viseme_span]:
     """Pull each span's start onto the previous span's end.
 
-    Boundaries within one sentence piece are derived from a frame count while
-    the piece-to-piece joins are derived from a sample count, so the two can
-    disagree in the last ulp. The client walks the timeline by comparing
-    against `end`, so make the contract exact rather than nearly exact.
+    A boundary inside a piece is `offset_seconds + samples / rate` - two
+    divisions and an add - while the piece-to-piece join is the next piece's
+    `offset_seconds`, one division of the running total. The two can disagree in
+    the last ulp. The client walks the timeline by comparing against `end`, so
+    make the contract exact rather than nearly exact.
     """
     return [
         span if index == 0 else viseme_span(
@@ -335,7 +451,7 @@ def merge_spans(
     ):
         merged = absorb_shortest(merged)
 
-    # A gap here means the caller's frame accounting is wrong, which would ship
+    # A gap here means the caller's sample accounting is wrong, which would ship
     # a timeline that silently drifts against the audio. Crash instead.
     if abs(merged[-1].end - total_duration_seconds) > 1e-6:
         raise ValueError(

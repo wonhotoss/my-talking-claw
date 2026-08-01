@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import server
-from app.tts_engine import speech_result, speech_segment
+from app.speech import speech_result, speech_segment
 from app.viseme import viseme_span
 
 

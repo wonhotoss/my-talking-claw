@@ -1,0 +1,63 @@
+# On-device Korean TTS service (Piper) as a portable container.
+#
+# The counterpart to Dockerfile.melo. Same app/, same /speak contract, a
+# different engine: piper-tts bundles espeak-ng and runs the voice on
+# onnxruntime, so there is no torch, no mecab-ko and no unidic here. That is the
+# whole reason the engines get one image each - together they would carry ~6GB
+# of non-overlapping dependencies.
+#
+# Both piper-tts and onnxruntime publish aarch64 wheels, so this image builds on
+# a Raspberry Pi unchanged (Dockerfile.melo does not - see platform-notes.md).
+
+ARG piper_version=1.6.0
+ARG piper_voice=ko_KR-kss-medium
+
+
+# --- voice stage: download and patch the model ------------------------------
+#
+# The stock voice only outputs audio. patch_voice_with_alignment marks the
+# graph's w_ceil tensor as a second output, which is what fills
+# AudioChunk.phoneme_alignments and therefore the viseme timeline. Done at build
+# time so the runtime image neither downloads on first request nor ships onnx
+# (a ~50MB dependency needed only for the patch itself).
+FROM python:3.11-slim AS voice
+ARG piper_version
+ARG piper_voice
+
+RUN pip install --no-cache-dir "piper-tts==${piper_version}" "onnx<2"
+
+RUN python -m piper.download_voices "${piper_voice}" --data-dir /voices \
+ && python -m piper.patch_voice_with_alignment \
+      "/voices/${piper_voice}.onnx" \
+      --output "/voices/${piper_voice}-aligned.onnx" \
+ && rm "/voices/${piper_voice}.onnx"
+
+
+# --- runtime ----------------------------------------------------------------
+FROM python:3.11-slim
+ARG piper_version
+ARG piper_voice
+
+# soundfile writes the WAV in app/speech.py. It is the same writer the MeloTTS
+# image uses, so both engines emit byte-identical WAV framing.
+RUN pip install --no-cache-dir \
+      "piper-tts==${piper_version}" \
+      "soundfile>=0.12" \
+      "fastapi>=0.115.0" \
+      "uvicorn[standard]>=0.30.0"
+
+COPY --from=voice /voices /voices
+
+WORKDIR /app
+COPY app /app/app
+
+ENV TTS_ENGINE=piper \
+    TTS_DEVICE=cpu \
+    TTS_SPEED=1.0 \
+    TTS_VISEME_MIN_SECONDS=0.04 \
+    TTS_ENVELOPE_HZ=50
+ENV PIPER_MODEL=/voices/${piper_voice}-aligned.onnx \
+    PIPER_CONFIG=/voices/${piper_voice}.onnx.json
+
+EXPOSE 8200
+CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8200"]

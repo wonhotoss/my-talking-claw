@@ -81,18 +81,30 @@ STT 서비스를 다른 머신에서 돌리려면 프론트엔드 코드를 바�
 
 ### 음성(TTS) 서비스
 
-에이전트 응답을 음성으로 합성하는 **독립형 온디바이스 TTS 서비스**다(엔진: MeloTTS-Korean). 폰 브라우저의 내장 음성에 의존하지 않고 우리가 목소리/품질을 제어한다. MeloTTS는 torch·mecab-ko·unidic 의존성 때문에 Windows 네이티브 설치가 어려워 **Docker 컨테이너**로 돌린다(어디서든 동일 — 데스크탑/라즈베리파이/Linux).
+에이전트 응답을 음성으로 합성하는 **독립형 온디바이스 TTS 서비스**다. 폰 브라우저의 내장 음성에 의존하지 않고 우리가 목소리/품질을 제어한다. **엔진이 둘**이고 같은 `/synthesize` + `/speak` 계약을 말한다.
+
+| 엔진 | `TTS_ENGINE` | 포트 | 이미지 | RTF(4코어) | RSS | 라이선스 |
+| --- | --- | --- | --- | --- | --- | --- |
+| MeloTTS-Korean | `melotts` (기본) | 8200 | 5.53GB | 0.98 | 2.4GB | MIT |
+| Piper `ko_KR-kss-medium` | `piper` | 8201 | 649MB | **0.057** | **252MB** | **CC BY-NC-SA 4.0** |
+
+Piper가 **17~27배 빠르고 메모리는 1/10**이라 라즈베리파이에서 실시간이 된다. 대신 목소리가 하나뿐이고 비상업 라이선스이며, 영어 차용어 발음이 MeloTTS보다 약하다. 실측 근거와 기기별 투영은 [platform-notes.md](platform-notes.md)에 있다.
+
+**이미지를 하나로 합치지 않는 이유**: 두 엔진의 의존성이 겹치지 않는다(MeloTTS는 torch+mecab-ko+unidic, Piper는 onnxruntime). 합치면 ~6GB를 들고 다녀야 해서 **코드는 하나, 이미지는 둘**로 간다. `app/`은 완전히 공유되고 엔진 어댑터만 `app/engines/`에서 갈린다.
 
 ```powershell
 cd tts
-docker compose up --build
+docker compose up -d --build piper     # 또는 melo, 또는 둘 다
 ```
 
 상태 확인:
 
 ```powershell
-curl http://localhost:8200/health
+curl http://localhost:8201/health       # {"status":"ok","engine":"piper","language":"KR"}
+curl http://localhost:8200/health       # {"status":"ok","engine":"melotts","language":"KR"}
 ```
+
+프론트를 한쪽으로 붙이려면 `frontend/vite.config.ts`의 `/tts` proxy 타깃을 8200/8201 중 하나로 바꾼다. 그 외에는 아무것도 바뀌지 않는다 — 두 엔진을 나란히 띄워 A/B로 비교할 수 있는 게 이 구조의 목적이다.
 
 합성 테스트(WAV 저장):
 
@@ -131,47 +143,77 @@ curl -s -X POST http://localhost:8200/speak -H "Content-Type: application/json" 
   predictor는 확률적(`noise_scale_w`)이라, 따로 두 번 호출하면 음소 길이가 달라져 타임라인이
   오디오와 어긋난다. WAV가 base64로 같이 실려 오는 이유다(+33%, LAN에선 수십 ms).
 
-환경변수:
+환경변수 — 공통:
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `TTS_ENGINE` | `melotts` | `melotts` 또는 `piper`. 이미지가 각자 자기 값을 박아둔다. |
+| `TTS_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
+| `TTS_SPEED` | `1.0` | 말하기 속도. |
+| `TTS_VISEME_MIN_SECONDS` | `0.04` (piper는 `0.02`) | 이보다 짧은 viseme 구간은 이웃에 흡수(깜빡임 방지). |
+| `TTS_ENVELOPE_HZ` | `50` | 초당 RMS 크기 샘플 수. |
+
+`TTS_VISEME_MIN_SECONDS`가 엔진별로 다른 건 실측 때문이다. Piper 목소리가 25% 빠르게 말해서
+자음이 짧다 — `만나서 반갑습니다`의 양순음 4개가 Piper에선 23/35/35/46ms, MeloTTS에선
+58/104/58/70ms다. 40ms 바닥을 그대로 두면 Piper에서 닫힌 입 4개 중 3개가 흡수돼 사라진다.
+
+MeloTTS 전용:
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `TTS_LANGUAGE` | `KR` | MeloTTS 언어. viseme 표는 한국어 전용이다. |
 | `TTS_SPEAKER` | `KR` | 화자 키. |
-| `TTS_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
-| `TTS_SPEED` | `1.0` | 말하기 속도. |
-| `TTS_VISEME_MIN_SECONDS` | `0.04` | 이보다 짧은 viseme 구간은 이웃에 흡수(깜빡임 방지). |
-| `TTS_ENVELOPE_HZ` | `50` | 초당 RMS 크기 샘플 수. |
 
-MeloTTS는 **커밋 SHA로 고정**되어 있다(`Dockerfile`의 `melotts_commit`). viseme 타임라인이
-`SynthesizerTrn.infer`의 어텐션 출력이라는 내부 구현에 의존하므로, 올릴 때는 의도적으로 올리고
-`tts/tests` + 실제 `/speak` 호출을 다시 확인한다.
+Piper 전용:
 
-첫 합성 시 MeloTTS-Korean 모델을 내려받는다(compose 볼륨 `tts_hf_cache`에 캐시). 다른 머신으로 이전하려면 `frontend/vite.config.ts`의 `/tts` proxy 타깃만 바꾼다. 엔진 교체(예: GPU의 Chatterbox)는 `tts/app/tts_engine.py`에서 처리한다.
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `PIPER_MODEL` | `/voices/ko_KR-kss-medium-aligned.onnx` | 정렬 출력이 패치된 음성 모델. |
+| `PIPER_CONFIG` | `/voices/ko_KR-kss-medium.onnx.json` | 모델 config(패치 전 파일 옆에 그대로 있다). |
+
+**엔진별 정렬(=viseme) 출처가 다르다.**
+
+- MeloTTS는 `SynthesizerTrn.infer`의 어텐션 출력이라는 **내부 구현**에 의존하므로 **커밋 SHA로
+  고정**되어 있다(`Dockerfile.melo`의 `melotts_commit`). 올릴 때는 의도적으로 올리고 `tts/tests`
+  + 실제 `/speak` 호출을 다시 확인한다.
+- Piper는 **공개 API**다. 다만 배포 모델은 오디오만 내보내므로 이미지 빌드 시
+  `python -m piper.patch_voice_with_alignment`로 그래프의 `w_ceil` 텐서를 출력으로 승격시킨다
+  (`Dockerfile.piper`의 voice 스테이지). 패치 안 된 모델을 물리면 `/speak`이 502로 거절한다 —
+  타임라인이 조용히 사라지는 것보다 낫다.
+
+MeloTTS는 첫 합성 시 모델을 내려받는다(compose 볼륨 `tts_hf_cache`에 캐시). Piper는 63MB 음성이
+이미지에 박혀 있어 볼륨도 다운로드도 없다.
+
+엔진을 추가하려면 `app/engines/`에 어댑터 하나(문장 조각 + 음소 심볼 + 심볼별 샘플 수)와
+`app/viseme.py`에 심볼 테이블 하나를 넣고 Dockerfile을 하나 더 만든다. `app/server.py`와
+`app/speech.py`(타임라인 조립·WAV·envelope)는 손댈 필요가 없다.
 
 #### Windows에서 TTS 설치·실행 가이드
 
-MeloTTS는 Windows에 네이티브로 설치되지 않는다(`mecab-ko` wheel 없음). **Docker Desktop**으로 컨테이너를 돌린다.
+두 엔진 다 Windows에 네이티브로 안 깔린다(MeloTTS는 `mecab-ko` wheel 없음, Piper는 espeak-ng 번들이 리눅스 빌드). **Docker Desktop**으로 컨테이너를 돌린다.
 
 1. Docker Desktop 설치 후 실행 → 트레이 고래 아이콘이 "running"이 될 때까지 대기.
-2. 최초 1회 이미지 빌드(수 분, torch/unidic 다운로드):
+2. 최초 1회 이미지 빌드. Piper는 1분 안쪽, MeloTTS는 수 분 걸린다(torch/unidic 다운로드):
    ```powershell
    cd tts
-   docker compose up -d --build
+   docker compose up -d --build piper     # 649MB
+   docker compose up -d --build melo      # 5.53GB
    ```
 3. 이후에는 빌드 없이:
    ```powershell
-   docker compose up -d      # 시작
-   docker compose down       # 정지
-   docker compose logs -f    # 로그
+   docker compose up -d piper   # 시작 (서비스명 생략하면 둘 다)
+   docker compose down          # 정지
+   docker compose logs -f       # 로그
    ```
-4. 상태 확인: `curl http://localhost:8200/health`
-5. 첫 합성 요청 때 MeloTTS-Korean 모델을 내려받아 볼륨 `tts_hf_cache`에 캐시한다(이후 재시작에도 유지).
+4. 상태 확인: `curl http://localhost:8201/health` (piper) / `http://localhost:8200/health` (melo)
+5. MeloTTS는 첫 합성 요청 때 모델을 내려받아 볼륨 `tts_hf_cache`에 캐시한다(이후 재시작에도 유지). Piper는 이미지에 이미 들어 있다.
 
 문제 해결:
 
-- 이미지가 커서 **첫 컨테이너 생성이 느릴 수 있다**(수 분). "Creating"에 한동안 머물러도 기다린다.
+- MeloTTS 이미지가 커서 **첫 컨테이너 생성이 느릴 수 있다**(수 분). "Creating"에 한동안 머물러도 기다린다. Piper는 몇 초면 뜬다.
 - Docker 데몬이 500/무응답으로 정체되면 **Docker Desktop 재시작**(또는 PowerShell `wsl --shutdown` 후 Docker Desktop 재실행) → `docker compose up -d`.
-- 빌드는 CPU 전용 `torch/torchaudio==2.2.2`로 고정되어 CUDA 수 GB를 받지 않는다. GPU를 쓰려면 Dockerfile의 torch 설치를 CUDA 휠로 바꾸고 `TTS_DEVICE=cuda`.
+- MeloTTS 빌드는 CPU 전용 `torch/torchaudio==2.2.2`로 고정되어 CUDA 수 GB를 받지 않는다. GPU를 쓰려면 `Dockerfile.melo`의 torch 설치를 CUDA 휠로 바꾸고 `TTS_DEVICE=cuda`.
+- **`Dockerfile.melo`는 라즈베리파이(arm64)에서 그대로는 빌드가 안 된다.** 고정한 `download.pytorch.org/whl/cpu` 인덱스에 torch 2.2.2 aarch64 휠이 없다(1.13.1까지만). `Dockerfile.piper`는 아무 수정 없이 빌드된다 — 자세한 건 [platform-notes.md](platform-notes.md) §4.
 
 ### 프론트엔드
 

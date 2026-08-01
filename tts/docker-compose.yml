@@ -1,9 +1,18 @@
+# Two engines, one service contract. Both containers run the same app/ and
+# answer the same /synthesize + /speak, so they are directly A/B comparable:
+# point the frontend's /tts proxy at 8200 or 8201 and nothing else changes.
+#
+# Bring up one (`docker compose up -d piper`) or both. They are separate images
+# because their dependency sets do not overlap - see Dockerfile.piper.
 services:
-  tts:
-    build: .
+  melo:
+    build:
+      context: .
+      dockerfile: Dockerfile.melo
     ports:
       - "127.0.0.1:8200:8200"
     environment:
+      TTS_ENGINE: melotts
       TTS_LANGUAGE: KR
       TTS_SPEAKER: KR
       TTS_DEVICE: cpu
@@ -15,6 +24,27 @@ services:
     # Persist the downloaded MeloTTS-Korean model across container restarts.
     volumes:
       - tts_hf_cache:/root/.cache/huggingface
+
+  piper:
+    build:
+      context: .
+      dockerfile: Dockerfile.piper
+    ports:
+      - "127.0.0.1:8201:8200"
+    environment:
+      TTS_ENGINE: piper
+      TTS_DEVICE: cpu
+      TTS_SPEED: "1.0"
+      # Half of melo's floor, because this voice talks ~25% faster and its
+      # consonants are correspondingly shorter. Measured on 만나서 반갑습니다:
+      # the four bilabials run 23/35/35/46ms here against 58/104/58/70ms on
+      # melo, so a 40ms floor absorbs three of the four closed mouths outright.
+      # The alignment quantum is ~11.6ms on both engines, so 20ms is still two
+      # quanta and not noise.
+      TTS_VISEME_MIN_SECONDS: "0.02"
+      TTS_ENVELOPE_HZ: "50"
+    # No volume: the 63MB voice is baked into the image, already patched for
+    # alignment output.
 
 volumes:
   tts_hf_cache:
