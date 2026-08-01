@@ -24,6 +24,8 @@ curl http://localhost:8000/health
 
 자율형 에이전트 **nullclaw의 gateway 계약**(`POST /pair`로 6자리 코드→bearer 토큰, `POST /webhook {"message": …}`, `GET /health`)을 그대로 구현한 스탠드인 서비스다. 이 PC엔 nullclaw가 없으므로 두뇌는 **헤드리스 Claude Code**(`claude -p`)가 대신한다. 프로덕션에선 이 서비스를 실제 nullclaw로 바꾸고 백엔드의 `AGENT_GATEWAY_URL`만 그쪽으로 돌리면 된다(백엔드 코드 무변경).
 
+이 홉은 day-6에서 TTS를 Piper로 바꾼 뒤 **턴의 병목**이 됐다. 홉 분해 실측, 이미 기각된 가설, 그리고 지연 신고가 들어왔을 때의 조사 순서는 [agent-latency-notes.md](agent-latency-notes.md)에 있다.
+
 `claude` CLI가 필요하다(기존 Claude Code 구독 인증을 재사용, 별도 API 키 불필요). 없으면 설치한다.
 
 ```powershell
@@ -104,7 +106,9 @@ curl http://localhost:8201/health       # {"status":"ok","engine":"piper","langu
 curl http://localhost:8200/health       # {"status":"ok","engine":"melotts","language":"KR"}
 ```
 
-프론트를 한쪽으로 붙이려면 `frontend/vite.config.ts`의 `/tts` proxy 타깃을 8200/8201 중 하나로 바꾼다. 그 외에는 아무것도 바뀌지 않는다 — 두 엔진을 나란히 띄워 A/B로 비교할 수 있는 게 이 구조의 목적이다.
+현재 프론트는 **piper(8201)** 를 가리킨다. 바꾸려면 `/tts` proxy 타깃을 8200/8201 중 하나로 고치는데, **`frontend/vite.config.ts`와 `frontend/vite.config.js`를 둘 다** 고쳐야 한다 — 둘 다 커밋되어 있고 **Vite는 `.js`를 `.ts`보다 먼저 찾으므로 실제로 로드되는 건 `.js`다**(`.ts`만 고치면 아무 일도 일어나지 않는다). 고치면 Vite가 감지해 자동 재시작한다.
+
+프록시 타깃 말고는 아무것도 바뀌지 않는다 — 두 엔진을 나란히 띄워 A/B로 비교할 수 있는 게 이 구조의 목적이다.
 
 합성 테스트(WAV 저장):
 

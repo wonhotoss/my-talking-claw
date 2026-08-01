@@ -18,8 +18,9 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/voice/, ""),
       },
       // Standalone TTS (text-to-speech) service — same pattern as /voice.
+      // 8200 melo / 8201 piper; both speak the same contract (tts/README).
       "/tts": {
-        target: "http://127.0.0.1:8200",
+        target: "http://127.0.0.1:8201",
         rewrite: (path) => path.replace(/^\/tts/, ""),
       },
     },
