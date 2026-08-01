@@ -106,23 +106,27 @@ export function spring_step(
 // The parameter types are inlined string unions rather than imported from
 // app.tsx: structural typing accepts the app's aliases at the call site, and
 // importing would make app -> face_view -> face_shapes -> app a cycle.
+//
+// The three inputs are genuinely concurrent now - the agent can still be working
+// while audio plays, and an utterance can start with nothing having been asked.
+// `speaking` therefore sits above `turn_active`: audio playing over a live turn
+// means the face is talking, not thinking.
+//
+// There is no `blocked` mood; mood_shapes is a deliberate five-set and the
+// status label carries that case.
 export function pick_mood(
   permission: "pending" | "granted" | "denied",
-  activity:
-    | "waiting"
-    | "recording"
-    | "transcribing"
-    | "thinking"
-    | "synthesizing"
-    | "speaking",
+  mic: "idle" | "recording" | "transcribing",
+  speech: "idle" | "synthesizing" | "speaking" | "blocked",
+  turn_active: boolean,
 ): face_mood {
   return permission === "denied"
     ? "denied"
-    : activity === "speaking"
+    : speech === "speaking"
       ? "talking"
-      : activity === "recording"
+      : mic === "recording"
         ? "listening"
-        : activity === "waiting"
-          ? "idle"
-          : "thinking";
+        : mic === "transcribing" || speech === "synthesizing" || turn_active
+          ? "thinking"
+          : "idle";
 }

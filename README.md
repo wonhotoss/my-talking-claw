@@ -18,7 +18,17 @@ uv run uvicorn app.server:app --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health
 ```
 
-백엔드는 사용자 입력을 아래 **에이전트 게이트웨이**로 위임한다. 환경변수 `AGENT_GATEWAY_URL`(기본 `http://127.0.0.1:3000`)과 `AGENT_PAIRING_CODE`(기본 `000000`)로 가리키며, 게이트웨이가 없으면 `/api/message`는 502를 반환한다.
+백엔드는 사용자 입력을 아래 **에이전트 게이트웨이**로 위임한다. 환경변수 `AGENT_GATEWAY_URL`(기본 `http://127.0.0.1:3000`)과 `AGENT_PAIRING_CODE`(기본 `000000`)로 가리킨다.
+
+day-7부터 프론트-백 계약은 **단일요청-단일응답이 아니다.** 클라이언트는 오래 열린 이벤트 스트림 하나를 구독하고, 트리거가 턴을 만들고, 턴이 이벤트 연속을 낳는다. 서버는 대기 중인 요청 없이도 말할 수 있다 → [이벤트 계약](#이벤트-계약-day-7) 절.
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AGENT_GATEWAY_URL` | `http://127.0.0.1:3000` | 게이트웨이 위치. |
+| `AGENT_PAIRING_CODE` | `000000` | 게이트웨이와 공유하는 페어링 코드. |
+| `AGENT_BEARER_TOKEN` | (없음) | 주면 페어링을 건너뛴다. |
+| `PUSH_TOKEN` | (없음) | `POST /api/push`의 토큰. **비우면 `/api/push`는 503**(조용히 받지 않는다). |
+| `TURN_TIMEOUT_SECONDS` | `300` | 턴 하나의 월클럭 예산. 넘으면 취소하고 `turn_ended{failed}`. |
 
 ### 에이전트 게이트웨이 (스탠드인)
 
@@ -43,14 +53,25 @@ $env:CLAUDE_BIN="$env:APPDATA\npm\node_modules\@anthropic-ai\claude-code\bin\cla
 uv run uvicorn app.server:app --host 127.0.0.1 --port 3000
 ```
 
+> **게이트웨이에 `--reload`를 붙이지 마라 (Windows).** uvicorn은 `--reload`(또는 `--workers`)를
+> 쓰면 Windows에서 **Selector** 이벤트 루프를 고르는데, 거기서는 `asyncio.create_subprocess_exec`가
+> 지원되지 않는다. 게이트웨이는 그걸로 `claude`를 띄우므로 모든 턴이 즉시 실패한다 —
+> `NotImplementedError()`는 메시지가 비어 있어서 화면에는 `agent failure: NotImplementedError:`만
+> 뜬다. 백엔드는 HTTP만 하니 `--reload`를 붙여도 된다. 코드를 고친 뒤에는 게이트웨이를 손으로
+> 재시작해야 한다.
+
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `AGENT_PAIRING_CODE` | `000000` | 백엔드와 공유하는 페어링 코드. |
 | `CLAUDE_BIN` | `claude` | claude 실행 파일(Linux는 PATH의 `claude`). Windows는 `.cmd`/`.ps1` 심이 아닌 실제 exe 경로로: `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe`. |
 | `CLAUDE_MODEL` | `sonnet` | 두뇌 모델(`sonnet`/`opus`/`haiku`). |
-| `CLAUDE_ALLOWED_TOOLS` | (없음) | 비우면 대화형(무툴). `Read,Glob,Grep` 등으로 자율 동작 확장. |
+| `CLAUDE_ALLOWED_TOOLS` | (없음) | **샌드박스가 아니다** — 아래 경고 참고. 자동 승인 목록일 뿐이다. |
 | `CLAUDE_SYSTEM_PROMPT` | (음성 비서 기본) | 짧은 한국어 구어체 응답 유도. |
 | `CLAUDE_WORKDIR` | (cwd) | claude 실행 디렉터리. |
+| `DEVICE_PUSH_URL` | (없음) | 백엔드의 `/api/push`. 아래 `DEVICE_PUSH_TOKEN`과 **둘 다** 있어야 시스템 프롬프트에 아웃바운드 채널이 실린다. |
+| `DEVICE_PUSH_TOKEN` | (없음) | 백엔드 `PUSH_TOKEN`과 같은 값. |
+
+> **경고 (day-7 실측, CLI 2.1.220).** `--allowedTools`는 **권한을 제한하지 않는다.** 자동 승인 목록일 뿐이다. `CLAUDE_ALLOWED_TOOLS`를 비운 상태로 `claude -p`를 돌려도 `system/init`은 툴 33개를 전부 available로 보고하고, `Read`가 permission denial 0건으로 실제 실행된다. 즉 **지금 이 게이트웨이의 에이전트는 이미 Read/Write/Edit/Bash를 쓸 수 있다.** "비우면 대화형(무툴)"이라는 이전 설명은 틀렸다. 실제로 막으려면 `--disallowedTools`가 필요하다.
 
 ### 음성(STT) 서비스
 
@@ -233,7 +254,7 @@ npm run dev
 https://<desktop-lan-ip>:5173
 ```
 
-프론트엔드 개발 서버는 HTTPS로 실행되고, `/api`와 `/health` 요청을 로컬 백엔드 `http://127.0.0.1:8000`으로 프록시한다.
+프론트엔드 개발 서버는 HTTPS로 실행되고, `/api`와 `/health` 요청을 로컬 백엔드 `http://127.0.0.1:8000`으로 프록시한다. SSE도 이 프록시를 그대로 통과한다(버퍼링 없음, day-7 실측).
 
 마이크 권한이 계속 거부되거나 `secureContext`가 `no`이면 브라우저가 개발용 인증서를 신뢰하지 않는 상태일 수 있다. 이 경우 신뢰된 인증서, 로컬 HTTPS 터널, 또는 같은 목적의 HTTPS 개발 환경이 필요하다.
 
@@ -257,8 +278,14 @@ https://<desktop-lan-ip>:5173/#/face
 바로 부팅할 수 있다.
 
 ```bash
-chromium --kiosk --ignore-certificate-errors https://<host>:5173/#/face
+chromium --kiosk --ignore-certificate-errors \
+  --autoplay-policy=no-user-gesture-required https://<host>:5173/#/face
 ```
+
+`--autoplay-policy=no-user-gesture-required`는 **필수다.** day-7부터 에이전트가 요청 없이
+먼저 말할 수 있는데(예약 알림), 무인 부팅한 키오스크에는 자동재생을 허용해 줄 탭 제스처가
+없다. 이 플래그가 없으면 예약 발화가 실제 타깃 기기에서 소리를 내지 못하고 화면만
+`탭하면 들려드릴게요`로 남는다.
 
 화면 아무 데나 누르면 녹음이 시작/정지된다(마이크 버튼과 동일 동작). 오른쪽 위의 **콘솔**
 버튼으로 돌아온다.
@@ -267,8 +294,73 @@ chromium --kiosk --ignore-certificate-errors https://<host>:5173/#/face
 `/tts/speak`가 준 viseme 타임라인을 따라 입모양이 바뀐다.
 
 입 아래에는 현재 상태가 표시된다 — 대기 중 / 듣고 있어요 / 받아쓰는 중 / 생각하는 중 /
-목소리 만드는 중. 말할 때는 같은 자리에 말하는 문장이 **노래방 자막**처럼 뜨고, 실제 발화
-속도에 맞춰 하이라이트가 쓸려간다.
+목소리 만드는 중 / 알림이 왔어요 / 탭하면 들려드릴게요 / 서버 연결 끊김. 말할 때는 같은
+자리에 말하는 문장이 **노래방 자막**처럼 뜨고, 실제 발화 속도에 맞춰 하이라이트가 쓸려간다.
+
+day-7부터 한 턴이 문장 여러 개로 나뉘어 도착하므로, 발화 사이에 `<audio>`의 소스를 바꾸는
+~90ms 창이 생긴다(실측). 그 동안 자막이 상태 라벨로 번쩍이지 않도록 마지막 자막을 유지한다.
+
+## 이벤트 계약 (day-7)
+
+프론트는 `GET /api/events`(SSE) 하나를 계속 열어두고, 트리거는 본문에 답이 없는 POST다. 모든 새 경로가 `/api` 아래인 건 의도적이다 — 그 프리픽스는 이미 프록시되므로 `vite.config.ts`와 **먼저 로드되는 `vite.config.js`**를 손으로 맞출 필요가 없다.
+
+```
+브라우저 ──GET  /api/events ─────────────► 계속 열림. 서버가 밀어넣는다.
+        ──POST /api/turns {text, turn_id} ──► 202 {turn_id}. 본문에 답이 없다.
+        ──POST /api/turns/{id}/cancel ──────► 202 {cancelled}. barge-in.
+에이전트 ──POST /api/push (X-Push-Token) ──► 기기가 말한다. 대기 요청 없음.
+```
+
+### 서버 → 클라이언트 이벤트
+
+`event:` 이름은 쓰지 않는다 — `EventSource.onmessage`는 이름 없는 이벤트만 받으므로, 이름을 쓰면 타입마다 리스너 등록이 필요하고 빠뜨리면 조용히 무동작이 된다. 핸들러 하나, `kind` 분기 하나. 일련번호는 **`id:` 라인에만** 둔다(클라이언트는 `lastEventId`로 읽고 중복을 버린다).
+
+```
+id: 412
+data: {"kind":"utterance","turn_id":"t_7","seq":2,"text":"결론은 이렇습니다."}
+```
+
+| kind | 필드 | 뜻 |
+| --- | --- | --- |
+| `stream_hello` | `protocol_version`, `active_turn` | 접속 시 첫 이벤트. **`id:`가 없다**(연결 스코프라 시퀀스를 먹지 않는다). |
+| `turn_started` | `turn_id`, `source`, `trigger_text`, `started_at` | `source`: `user`/`agent`/`external`. `trigger_text` 덕에 키오스크가 폰 사용자의 말을 본다. |
+| `utterance` | `turn_id`, `seq`, `text` | **소리 내어 말할 한 덩어리.** 클라이언트가 `/tts/speak`에 던진다. |
+| `notice` | `turn_id`, `notice_kind`, `text` | **보여주기만 하고 말하지 않는다.** 툴 사용·진행 상황. |
+| `turn_cancelling` | `turn_id` | 프로세스가 죽기 전에 즉시 발행 → 클라이언트가 *지금* 오디오를 멈춘다. |
+| `turn_ended` | `turn_id`, `reason` | `completed`/`cancelled`/`failed`. |
+| `error` | `turn_id`, `message` | 턴을 끝내지 않는다. 항상 뒤에 `turn_ended{failed}`가 온다. |
+
+`utterance` vs `notice`가 이 스키마의 핵심선이다. "조사해 보겠습니다"는 에이전트가 실제로 한 말이므로 `utterance`(말한다). 회색 상태줄 "WebSearch"는 `notice`(말하지 않는다). 클라이언트 오디오 파이프라인이 정확히 이 분기를 탄다.
+
+**불변식**: `turn_started` 하나당 `turn_ended` 정확히 하나 — 실패·취소·타임아웃·크래시 전부 포함. `seq`는 턴별 0-based 연속. 빈 응답은 조용한 턴이 아니라 `turn_ended{failed}`다.
+
+**재접속**: `Last-Event-ID`가 있으면 그 뒤만 재생하고 hello를 보내지 않는다. 헤더가 없으면 재생하지 않고 hello만 보낸다 — 새로고침이 지난 턴을 다시 말하면 안 되니까. 윈도우(256) 밖이면 hello로 폴백한다.
+
+### 에이전트가 스스로 말하기 (예약작업)
+
+`POST /api/push`는 데모용 곁가지가 아니라 **에이전트의 아웃바운드 채널**이다. 스케줄링 책임은 에이전트가 진다. 기기는 "말해라"만 노출한다.
+
+```powershell
+# 그대로 말한다. 에이전트 홉 없음, 서브프로세스 없음, 토큰 소모 없음.
+curl -X POST http://127.0.0.1:8000/api/push `
+  -H 'X-Push-Token: ...' -H 'Content-Type: application/json' `
+  -d '{"source":"agent","prompt":null,"utterances":["일곱 시예요."]}'
+
+# 또는 비요청 에이전트 턴 하나를 돌린다.
+  -d '{"source":"agent","prompt":"사용자에게 7시라고 알려줘","utterances":null}'
+```
+
+`prompt`와 `utterances`는 **정확히 하나만** 설정해야 한다(아니면 400).
+
+진짜 nullclaw는 자체 스케줄링 엔진을 가진 상주 에이전트라 7시에 스스로 깨어나 이걸 호출한다. 스탠드인(`claude -p`)은 턴 사이에 죽는 일회성 서브프로세스라 **타이머를 들고 있을 수 없다** — 아키텍처의 한계가 아니라 스탠드인의 한계다. 스탠드인이 예약하려면 턴 도중에 OS에 위임해야 하므로 `DEVICE_PUSH_*`와 함께 `CLAUDE_ALLOWED_TOOLS`를 열어야 한다(위 경고를 먼저 읽을 것). 리눅스 `at` 한 줄이면 된다.
+
+> **알려진 거친 부분**: 새 트리거는 활성 턴을 선점한다(최신 의도가 이긴다). 따라서 에이전트가 **자기 턴이 도는 동안** push하면 자기 턴을 취소한다. 시끄럽게 실패하지만(`turn_ended{cancelled}`) 혼란스럽다. 시스템 프롬프트가 막지만 계약이 막는 게 아니다.
+
+### 게이트웨이 NDJSON (nullclaw 계약 확장 제안)
+
+`POST /webhook`에 선택적 동작 하나가 추가된다. 요청에 `Accept: application/x-ndjson`이 있으면 게이트웨이는 `Content-Type: application/x-ndjson`과 한 줄에 JSON 객체 하나씩인 청크 본문으로 응답해도 된다. 각 줄은 `{"type": "reply"|"notice"|"done"|"error", ...}`다. 구현하지 않은 게이트웨이는 헤더를 무시하고 지금과 똑같이 응답한다. 클라이언트가 **응답 Content-Type으로 분기**하므로 협상도, 버전 필드도, 설정도 없다. **문장 분할은 이 계약의 일부가 아니다** — 백엔드가 받은 텍스트를 알아서 자른다. 따라서 비스트리밍 게이트웨이가 잃는 것은 첫 문장의 *타이밍*뿐, 기능이 아니다.
+
+발화의 입도는 백엔드와 클라이언트의 계약이고, 전달의 입도는 게이트웨이와 백엔드의 계약이다. 두 관심사, 두 손잡이, 합치지 말 것.
 
 ## STT 미지원 확인
 
@@ -342,3 +434,29 @@ uv run pytest
 cd frontend
 npm run build
 ```
+
+현재 147개 통과(backend 59 / agent-gateway 19 / voice 5 / tts 64).
+
+이벤트 계약은 curl만으로 전부 확인된다. 한 터미널에서 스트림을 열어두고,
+
+```powershell
+curl -N http://127.0.0.1:8000/api/events
+```
+
+다른 터미널에서 트리거를 넣는다.
+
+```powershell
+# 사용자 턴 (turn_id는 클라이언트가 만든다)
+curl -X POST http://127.0.0.1:8000/api/turns -H 'Content-Type: application/json' `
+  -d '{"text":"자기소개를 두 문장으로 해줘","turn_id":"t_manual_1"}'
+
+# 예약작업 데모 — 대기 중인 클라이언트 요청 없이 기기가 말한다
+curl -X POST http://127.0.0.1:8000/api/push -H 'X-Push-Token: ...' `
+  -H 'Content-Type: application/json' `
+  -d '{"source":"agent","prompt":null,"utterances":["일곱 시예요."]}'
+
+# 취소 → 서브프로세스가 실제로 사라지는지 같이 본다
+curl -X POST http://127.0.0.1:8000/api/turns/t_manual_1/cancel
+```
+
+`:8000`뿐 아니라 **`https://<host>:5173/api/...`로도** 같은 걸 돌려야 프록시가 SSE를 버퍼링하지 않는다는 게 확인된다.

@@ -1,10 +1,24 @@
+import dataclasses
+import json
 import os
 import secrets
+from collections.abc import AsyncIterator
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.claude_agent import claude_agent
+from app.claude_agent import agent_line, claude_agent
+
+
+# Proposed extension to nullclaw's webhook contract: a client that sends
+# `Accept: application/x-ndjson` may get a chunked body of one JSON object per
+# line instead of a single reply. A gateway that does not implement it ignores
+# the header and answers exactly as before, and the client branches on the
+# response Content-Type - so there is no negotiation, no version field and no
+# configuration. Sentence segmentation is deliberately not part of the contract;
+# a non-streaming gateway loses only the timing of the first sentence.
+ndjson_media_type = "application/x-ndjson"
 
 
 class webhook_request(BaseModel):
@@ -26,7 +40,7 @@ class health_response(BaseModel):
 
 app = FastAPI(
     title="My Talking Claw Agent Gateway",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 agent = claude_agent()
@@ -59,19 +73,55 @@ def require_token(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="invalid bearer token")
 
 
-@app.post("/webhook", response_model=webhook_response)
+def encode_line(line: agent_line) -> bytes:
+    # From the dataclass rather than a hand-written dict: the dataclass *is* the
+    # declaration of the wire shape, so a field added there cannot be silently
+    # dropped on the way out.
+    return (json.dumps(dataclasses.asdict(line), ensure_ascii=False) + "\n").encode()
+
+
+async def stream_lines(message: str) -> AsyncIterator[bytes]:
+    try:
+        async for line in agent.stream(message):
+            yield encode_line(line)
+    except Exception as error:
+        # The 200 is already on the wire, so a failure has to arrive as a line.
+        # CancelledError is a BaseException and deliberately not caught here: a
+        # disconnected client must propagate so claude_agent kills the subprocess.
+        #
+        # The class name is included because the messages that matter most are
+        # empty: `NotImplementedError()` - which is what create_subprocess_exec
+        # raises on a Windows SelectorEventLoop - reads as "agent failure: " and
+        # says nothing at all.
+        yield encode_line(
+            agent_line(
+                type="error",
+                text=f"agent failure: {type(error).__name__}: {error}",
+                kind=None,
+            )
+        )
+
+
+# No response_model: this endpoint has two body shapes.
+@app.post("/webhook")
 async def post_webhook(
     request: webhook_request,
+    accept: str | None = Header(default=None),
     _: None = Depends(require_token),
-) -> webhook_response:
+) -> Response:
     message = request.message.strip()
 
     if message == "":
         raise HTTPException(status_code=400, detail="message must not be empty")
 
+    if accept is not None and ndjson_media_type in accept:
+        return StreamingResponse(stream_lines(message), media_type=ndjson_media_type)
+
     try:
         reply = await agent.respond(message)
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"agent failure: {error}")
+        raise HTTPException(
+            status_code=502, detail=f"agent failure: {type(error).__name__}: {error}"
+        )
 
-    return webhook_response(reply=reply)
+    return JSONResponse(content=webhook_response(reply=reply).model_dump())

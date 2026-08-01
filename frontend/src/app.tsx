@@ -3,16 +3,20 @@ import { Mic, Square, Volume2, VolumeX } from "lucide-react";
 
 import { face_view } from "./face_view";
 import { pick_mood } from "./face_shapes";
-import { fetch_spoken_reply } from "./speech_track";
+import {
+  api_base_url,
+  read_stream_status,
+  subscribe_events,
+  subscribe_stream_status,
+} from "./event_stream";
+import type { server_event } from "./event_stream";
+import { create_speech_queue } from "./speech_queue";
+import type { speech_phase, speech_queue } from "./speech_queue";
 import type { speech_track } from "./speech_track";
-
-type message_response = {
-  text: string;
-};
 
 type layout_kind = "console" | "face";
 
-type timeline_kind = "user" | "agent" | "system";
+type timeline_kind = "user" | "agent" | "notice" | "system";
 type timeline_level = "info" | "error";
 type timeline_entry = {
   id: number;
@@ -23,49 +27,89 @@ type timeline_entry = {
 };
 type mic_permission = "pending" | "granted" | "denied";
 
-// One state for the whole turn, finer than the old idle/recording/processing.
-// "processing" hid the longest phase of all: TTS synthesis runs after run_turn
-// has already returned, so the face used to fall back to idle for the several
-// seconds it takes to make the audio.
-type activity_state =
-  | "waiting"
-  | "recording"
-  | "transcribing"
-  | "thinking"
-  | "synthesizing"
-  | "speaking";
+// The old single activity_state conflated three things that are now genuinely
+// concurrent: the agent can still be thinking while audio plays, and an
+// unsolicited utterance can start from rest. Split into what the mic is doing,
+// what the speaker is doing, and whether a turn is live - and compute the label.
+type mic_phase = "idle" | "recording" | "transcribing";
 
-const activity_labels: Record<activity_state, string> = {
-  waiting: "대기 중",
-  recording: "듣고 있어요",
-  transcribing: "받아쓰는 중",
-  thinking: "생각하는 중",
-  synthesizing: "목소리 만드는 중",
-  speaking: "말하는 중",
-};
+const denied_label = "마이크 권한이 없어요";
+const recording_label = "듣고 있어요";
+const transcribing_label = "받아쓰는 중";
+const thinking_label = "생각하는 중";
+const synthesizing_label = "목소리 만드는 중";
+const speaking_label = "말하는 중";
+const waiting_label = "대기 중";
+const alarm_label = "알림이 왔어요";
+const blocked_label = "탭하면 들려드릴게요";
+const offline_label = "서버 연결 끊김";
 
-// The mic is only locked out while a turn is mid-flight. Synthesis and playback
-// stay tappable so a reply can be cut off.
-function is_busy(activity: activity_state): boolean {
-  return activity === "transcribing" || activity === "thinking";
+// offline_label sits below turn_label so a momentary reconnect does not nag in
+// the middle of a turn.
+function pick_status_label(
+  permission: mic_permission,
+  mic: mic_phase,
+  speech: speech_phase,
+  turn_label: string,
+  stream: "connecting" | "open" | "closed",
+): string {
+  return permission === "denied"
+    ? denied_label
+    : mic === "recording"
+      ? recording_label
+      : mic === "transcribing"
+        ? transcribing_label
+        : speech === "blocked"
+          ? blocked_label
+          : speech === "speaking"
+            ? speaking_label
+            : speech === "synthesizing"
+              ? synthesizing_label
+              : turn_label !== ""
+                ? turn_label
+                : stream === "closed"
+                  ? offline_label
+                  : waiting_label;
 }
 
-const api_base_url = import.meta.env.VITE_API_BASE_URL || "";
+// The mic is only locked out while the recording is being transcribed. It stays
+// live for the whole rest of a turn, because interrupting is the point: the
+// server owns the turn and can be told to abandon it.
+function is_busy(mic: mic_phase): boolean {
+  return mic === "transcribing";
+}
 
-async function send_message(text: string): Promise<message_response> {
-  const response = await fetch(`${api_base_url}/api/message`, {
+// The console is a debug log, and turns can now start with nobody watching (a
+// scheduled announcement on an unattended kiosk), so it is capped rather than
+// grown forever - every append copies the array, and on #/face it is never even
+// rendered.
+const max_timeline_entries = 300;
+
+// Returns as soon as the turn is registered. The reply does not come back here
+// at all - it arrives on the event stream, possibly as several utterances
+// seconds apart.
+async function trigger_turn(text: string, turn_id: string): Promise<void> {
+  const response = await fetch(`${api_base_url}/api/turns`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, turn_id }),
   });
 
   if (!response.ok) {
     throw new Error(`에이전트 서버 오류 ${response.status}`);
   }
+}
 
-  return response.json() as Promise<message_response>;
+async function cancel_turn(turn_id: string): Promise<void> {
+  const response = await fetch(`${api_base_url}/api/turns/${turn_id}/cancel`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`턴 취소 오류 ${response.status}`);
+  }
 }
 
 // The voice service is a separate deployable server reached through a relative
@@ -148,17 +192,27 @@ export function app_shell() {
   const entry_id_ref = useRef(0);
   const timeline_end_ref = useRef<HTMLDivElement | null>(null);
   const audio_ref = useRef<HTMLAudioElement | null>(null);
-  const tts_url_ref = useRef<string | null>(null);
   // A ref, not state: the face's animation loop reads it every frame, and
-  // going through state would re-render the whole shell mid-utterance.
+  // going through state would re-render the whole shell mid-utterance. The
+  // speech queue owns writing it now, including freeing each object URL.
   const speech_track_ref = useRef<speech_track | null>(null);
   const silent_url_ref = useRef<string | null>(null);
   const audio_unlocked_ref = useRef(false);
-  const audio_unlocking_ref = useRef(false);
+  const queue_ref = useRef<speech_queue | null>(null);
+  // The identity gate for incoming events, read outside render. A single ref is
+  // enough instead of a set of cancelled turns, because the server runs one turn
+  // at a time: after a barge-in this is null, so every straggling utterance from
+  // the abandoned turn is dropped.
+  const accepted_turn_ref = useRef<string | null>(null);
 
   const [timeline, set_timeline] = useState<timeline_entry[]>([]);
   const [permission, set_permission] = useState<mic_permission>("pending");
-  const [activity, set_activity] = useState<activity_state>("waiting");
+  const [mic_phase, set_mic_phase] = useState<mic_phase>("idle");
+  const [speech, set_speech] = useState<speech_phase>("idle");
+  // Not a mirror of accepted_turn_ref: one is an id used to filter events and
+  // address a cancel, the other is the server's own status prose. Neither is
+  // derivable from the other. "" means no live turn.
+  const [turn_label, set_turn_label] = useState("");
 
   const append_entry = (kind: timeline_kind, text: string, level: timeline_level) => {
     entry_id_ref.current += 1;
@@ -171,29 +225,31 @@ export function app_shell() {
       time: new Date().toLocaleTimeString(),
     };
 
-    set_timeline((current) => [...current, entry]);
+    set_timeline((current) => [...current, entry].slice(-max_timeline_entries));
   };
 
   const log_system = (text: string) => append_entry("system", text, "info");
   const log_error = (text: string) => append_entry("system", text, "error");
   const add_user = (text: string) => append_entry("user", text, "info");
   const add_agent = (text: string) => append_entry("agent", text, "info");
+  const add_notice = (text: string) => append_entry("notice", text, "info");
 
-  const stop_speaking = () => {
-    const audio = audio_ref.current;
+  // Turn liveness is two values written as a pair everywhere, so the pairing
+  // lives here instead of being re-established by hand at every call site.
+  // `adopt` and `finish` are the whole vocabulary: finishing leaves whatever is
+  // queued playing, which is exactly why the state was split off from playback.
+  const adopt_turn = (turn_id: string, label: string) => {
+    accepted_turn_ref.current = turn_id;
+    set_turn_label(label);
+  };
 
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
-
-    speech_track_ref.current = null;
-    set_activity("waiting");
+  const finish_turn = () => {
+    accepted_turn_ref.current = null;
+    set_turn_label("");
   };
 
   // Play a short silent clip on the real audio element, inside the tap gesture,
-  // so iOS permits the later (post-fetch) TTS playback. The element's play/end
-  // handlers are suppressed during this unlock via audio_unlocking_ref.
+  // so iOS permits the later (post-fetch) TTS playback.
   const unlock_audio = () => {
     const audio = audio_ref.current;
 
@@ -201,11 +257,19 @@ export function app_shell() {
       return;
     }
 
+    // An unsolicited utterance can play before any tap has happened (desktop, or
+    // a Pi kiosk started with --autoplay-policy=no-user-gesture-required). If it
+    // is already making sound the element is de facto unlocked, and swapping in
+    // the silent WAV underneath a live end-waiter would strand the queue.
+    if (!audio.paused) {
+      audio_unlocked_ref.current = true;
+      return;
+    }
+
     if (silent_url_ref.current === null) {
       silent_url_ref.current = make_silent_wav_url();
     }
 
-    audio_unlocking_ref.current = true;
     audio.src = silent_url_ref.current;
     audio.muted = true;
     void audio
@@ -217,43 +281,99 @@ export function app_shell() {
       .catch(() => undefined)
       .finally(() => {
         audio.muted = false;
-        audio_unlocking_ref.current = false;
       });
 
     audio_unlocked_ref.current = true;
   };
 
-  // TTS runs on the standalone TTS service (relative /tts, proxied), so the
-  // voice is ours and not tied to the phone's built-in speech engine.
-  const speak_text = async (text: string) => {
-    const audio = audio_ref.current;
+  // Invariant that makes the one-shot effect below safe: this handler and the
+  // speech queue read refs and call setters. They never read React state.
+  const handle_server_event = (event: server_event, queue: speech_queue) => {
+    switch (event.kind) {
+      case "stream_hello":
+        // The server sends this exactly when it could not resume us, so it is
+        // the one authority on turn liveness across a gap. A plain reconnect
+        // replays instead, and must leave the turn we are mid-way through alone.
+        if (event.active_turn === null) {
+          finish_turn();
+        } else {
+          adopt_turn(event.active_turn.turn_id, thinking_label);
+        }
 
-    if (audio === null) {
-      return;
-    }
+        log_system(`스트림 연결 (v${event.protocol_version})`);
+        return;
 
-    // Owned here rather than in run_turn: speak_text is deliberately not
-    // awaited, so run_turn returns while the audio is still being made.
-    set_activity("synthesizing");
+      case "turn_started":
+        // "The newest intent wins" has to be enforced here, not only in the
+        // runner: a turn's utterances are published long before the device has
+        // finished saying them, and a verbatim announcement is published all at
+        // once, so the server sees that turn as over while seconds of its audio
+        // are still queued. Any turn that is not the one we already adopted
+        // therefore clears the speaker. Our own turn is adopted before its POST,
+        // so it matches and is left alone.
+        if (event.turn_id !== accepted_turn_ref.current) {
+          queue.cancel();
+        }
 
-    try {
-      // /speak returns the WAV together with its viseme timeline, from one
-      // synthesis — the two cannot be fetched separately because the duration
-      // predictor is stochastic and would give the face the wrong timings.
-      const spoken = await fetch_spoken_reply(text);
+        adopt_turn(event.turn_id, event.source === "user" ? thinking_label : alarm_label);
+        log_system(`턴 시작 (${event.source})`);
 
-      if (tts_url_ref.current !== null) {
-        URL.revokeObjectURL(tts_url_ref.current);
-      }
+        if (event.source !== "user" && event.trigger_text !== null) {
+          add_user(event.trigger_text);
+        }
 
-      tts_url_ref.current = spoken.audio_url;
-      speech_track_ref.current = spoken.track;
-      audio.src = spoken.audio_url;
-      await audio.play();
-    } catch (error) {
-      speech_track_ref.current = null;
-      set_activity("waiting");
-      log_error(error instanceof Error ? error.message : "TTS 재생 실패");
+        return;
+
+      case "notice":
+        if (event.turn_id !== accepted_turn_ref.current) {
+          return;
+        }
+
+        set_turn_label(event.text);
+        add_notice(event.text);
+        return;
+
+      case "utterance":
+        if (event.turn_id !== accepted_turn_ref.current) {
+          log_system("지난 턴의 발화를 버렸습니다");
+          return;
+        }
+
+        add_agent(event.text);
+        queue.push(event.text);
+        return;
+
+      case "turn_cancelling":
+        if (event.turn_id !== accepted_turn_ref.current) {
+          return;
+        }
+
+        // The one case that also drops the audio: the turn was abandoned, so
+        // what is queued is no longer wanted.
+        finish_turn();
+        queue.cancel();
+        return;
+
+      case "turn_ended":
+        if (event.turn_id !== accepted_turn_ref.current) {
+          return;
+        }
+
+        // Clears the label, not the queue: when the turn ends server-side the
+        // last utterances are usually still playing. That separation is exactly
+        // why the state was split.
+        finish_turn();
+        log_system(`턴 종료 (${event.reason})`);
+        return;
+
+      case "error":
+        log_error(event.message);
+
+        if (event.turn_id === accepted_turn_ref.current) {
+          finish_turn();
+        }
+
+        return;
     }
   };
 
@@ -287,28 +407,30 @@ export function app_shell() {
   const run_turn = async (blob: Blob) => {
     if (blob.size === 0) {
       log_error("녹음된 오디오가 없습니다.");
-      set_activity("waiting");
+      set_mic_phase("idle");
       return;
     }
 
+    // Client-generated so a barge-in during the trigger round trip still has an
+    // id to cancel, and so our own turn is distinguishable from a scheduled one.
+    const turn_id = crypto.randomUUID();
+
     try {
-      set_activity("transcribing");
+      set_mic_phase("transcribing");
       log_system("음성 전사 요청");
       const text = await transcribe_audio(blob);
       add_user(text);
 
-      set_activity("thinking");
-      log_system("에이전트 요청");
-      const data = await send_message(text);
-      add_agent(data.text);
-
-      log_system("TTS 재생");
-      // Not awaited on purpose, so a long synthesis does not block the UI.
-      // speak_text carries the activity state from here on.
-      void speak_text(data.text);
+      // Adopted before the POST: turn_started can land first, and it must not
+      // be filtered out as belonging to somebody else's turn.
+      adopt_turn(turn_id, thinking_label);
+      log_system("턴 트리거");
+      await trigger_turn(text, turn_id);
     } catch (error) {
+      finish_turn();
       log_error(error instanceof Error ? error.message : "처리 실패");
-      set_activity("waiting");
+    } finally {
+      set_mic_phase("idle");
     }
   };
 
@@ -331,35 +453,85 @@ export function app_shell() {
       // Release the mic so the next TTS playback doesn't fight the capture
       // session, and the next turn starts from a clean stream.
       release_microphone();
+      queue_ref.current?.set_hold(false);
       void run_turn(blob);
     };
 
     recorder.start();
-    set_activity("recording");
+    set_mic_phase("recording");
     log_system("녹음 시작");
   };
 
   const handle_mic_click = async () => {
+    const queue = queue_ref.current;
+
+    if (queue === null) {
+      throw new Error("speech queue was not created");
+    }
+
     // Must run synchronously inside the tap gesture to unlock iOS audio.
     unlock_audio();
 
-    if (activity === "recording") {
+    // A blocked utterance is waiting for exactly this gesture. Play it rather
+    // than dropping it, and do not start recording.
+    if (speech === "blocked") {
+      queue.resume();
+      return;
+    }
+
+    if (mic_phase === "recording") {
       media_recorder_ref.current?.stop();
       return;
     }
 
-    // Stop any TTS playback first so iOS frees the audio session before we grab
-    // the mic — otherwise the fresh stream can start muted for a moment.
-    stop_speaking();
+    // Stop any playback first so iOS frees the audio session before we grab
+    // the mic — otherwise the fresh stream can start muted for a moment. The
+    // hold goes on before the permission await, not after the recorder starts:
+    // an alarm arriving in that window would otherwise be synthesised and played
+    // straight over the capture session (the day-4 iOS conflict).
+    queue.cancel();
+    queue.set_hold(true);
+
+    const turn_id = accepted_turn_ref.current;
+    finish_turn();
+
+    if (turn_id !== null) {
+      log_system("턴 취소 요청");
+      void cancel_turn(turn_id).catch((error) =>
+        log_error(error instanceof Error ? error.message : "턴 취소 실패"),
+      );
+    }
 
     const stream = await acquire_microphone();
 
     if (!stream) {
+      queue.set_hold(false);
       return;
     }
 
     start_turn_recording(stream);
   };
+
+  useEffect(() => {
+    const queue = create_speech_queue({
+      audio: audio_ref,
+      track: speech_track_ref,
+      on_phase: set_speech,
+      on_error: log_error,
+    });
+    queue_ref.current = queue;
+
+    const unsubscribe = subscribe_events({
+      on_event: (event) => handle_server_event(event, queue),
+      on_error: log_error,
+    });
+
+    return () => {
+      unsubscribe();
+      queue.cancel();
+      queue_ref.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     // Prompt for mic permission on load, then release the track. Each recording
@@ -379,17 +551,18 @@ export function app_shell() {
   }, [timeline]);
 
   const hash = useSyncExternalStore(subscribe_hash, read_hash);
+  const stream = useSyncExternalStore(subscribe_stream_status, read_stream_status);
   const layout: layout_kind = hash === "#/face" ? "face" : "console";
-  const mood = pick_mood(permission, activity);
-  const status_label =
-    permission === "denied" ? "마이크 권한이 없어요" : activity_labels[activity];
+  const mood = pick_mood(permission, mic_phase, speech, turn_label !== "");
+  const status_label = pick_status_label(permission, mic_phase, speech, turn_label, stream);
 
   // The console body is wrapped in a single fragment so that both layouts
   // render exactly two children, [branch, audio]. React reconciles by
   // position: if the child count differed, the <audio> element would be
   // destroyed and recreated on every view switch, and since audio_unlocked_ref
   // would still say "true" it would never be unlocked again — permanently
-  // silent TTS on iOS. Do not flatten this.
+  // silent TTS on iOS. Do not flatten this, and do not add a sibling here:
+  // every new console element belongs inside the fragment.
   return (
     <main className={layout === "face" ? "face_root" : "app_shell"}>
       {layout === "face" ? (
@@ -398,6 +571,7 @@ export function app_shell() {
           status_label,
           audio_ref,
           speech_track_ref,
+          speech_pending: speech !== "idle",
           on_tap: () => void handle_mic_click(),
           on_exit: () => {
             window.location.hash = "";
@@ -415,8 +589,13 @@ export function app_shell() {
                 className={`perm_dot perm_${permission}`}
                 title={`마이크 권한: ${permission}`}
               />
-              <div className={`speaker_lamp ${activity === "speaking" ? "on" : ""}`}>
-                {activity === "speaking" ? <Volume2 size={18} /> : <VolumeX size={18} />}
+              <span
+                className={`stream_dot stream_${stream}`}
+                title={`이벤트 스트림: ${stream}`}
+              />
+              {turn_label !== "" && <span className="turn_chip">{turn_label}</span>}
+              <div className={`speaker_lamp ${speech === "speaking" ? "on" : ""}`}>
+                {speech === "speaking" ? <Volume2 size={18} /> : <VolumeX size={18} />}
                 <span>{status_label}</span>
               </div>
               <a className="face_link" href="#/face">
@@ -438,6 +617,11 @@ export function app_shell() {
                     <span className="entry_time">{entry.time}</span>
                     <span>{entry.text}</span>
                   </span>
+                ) : entry.kind === "notice" ? (
+                  <span className="notice_line">
+                    <span className="entry_time">{entry.time}</span>
+                    <span>{entry.text}</span>
+                  </span>
                 ) : (
                   <div className="bubble">
                     <span className="entry_who">
@@ -453,17 +637,17 @@ export function app_shell() {
 
           <footer className="mic_bar">
             <button
-              className={`mic_button ${activity === "recording" ? "recording" : ""}`}
+              className={`mic_button ${mic_phase === "recording" ? "recording" : ""}`}
               type="button"
               onClick={() => void handle_mic_click()}
-              disabled={is_busy(activity)}
-              aria-label={activity === "recording" ? "녹음 정지" : "말하기 시작"}
+              disabled={is_busy(mic_phase)}
+              aria-label={mic_phase === "recording" ? "녹음 정지" : "말하기 시작"}
             >
-              {activity === "recording" ? <Square size={30} /> : <Mic size={30} />}
+              {mic_phase === "recording" ? <Square size={30} /> : <Mic size={30} />}
               <span>
-                {activity === "recording"
+                {mic_phase === "recording"
                   ? "정지"
-                  : is_busy(activity)
+                  : is_busy(mic_phase)
                     ? "처리 중"
                     : "말하기"}
               </span>
@@ -472,34 +656,9 @@ export function app_shell() {
         </>
       )}
 
-      <audio
-        ref={audio_ref}
-        hidden
-        onPlay={() => {
-          if (audio_unlocking_ref.current) {
-            return;
-          }
-
-          set_activity("speaking");
-          log_system("재생 시작");
-        }}
-        onEnded={() => {
-          if (audio_unlocking_ref.current) {
-            return;
-          }
-
-          set_activity("waiting");
-          log_system("재생 완료");
-        }}
-        onError={() => {
-          if (audio_unlocking_ref.current) {
-            return;
-          }
-
-          set_activity("waiting");
-          log_error("TTS 재생 오류");
-        }}
-      />
+      {/* No React event handlers: the speech queue is the single owner of
+          playback lifecycle. Still the second and last child of <main>. */}
+      <audio ref={audio_ref} hidden />
     </main>
   );
 }

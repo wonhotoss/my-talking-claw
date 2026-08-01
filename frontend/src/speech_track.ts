@@ -58,13 +58,21 @@ function base64_to_blob(base64: string, media_type: string): Blob {
 // The WAV rides along base64-encoded rather than as a second request because
 // the duration predictor is stochastic: a separate metadata call would return
 // timings for a different synthesis than the audio being played.
-export async function fetch_spoken_reply(text: string): Promise<spoken_reply> {
+//
+// `signal` is required rather than optional: every caller is a queue that can be
+// barged in on, and a synthesis nobody is waiting for still occupies the
+// single-model TTS service.
+export async function fetch_spoken_reply(
+  text: string,
+  signal: AbortSignal,
+): Promise<spoken_reply> {
   const response = await fetch("/tts/speak", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ text }),
+    signal,
   });
 
   if (!response.ok) {

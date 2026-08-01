@@ -45,6 +45,11 @@ export type face_view_props = {
   status_label: string;
   audio_ref: RefObject<HTMLAudioElement | null>;
   speech_track_ref: RefObject<speech_track | null>;
+  // True while the queue still has something to say. Holds the last caption
+  // through the src swap between utterances - the track is null for ~100ms
+  // there, which would otherwise flash the status label between every pair of
+  // sentences.
+  speech_pending: boolean;
   on_tap: () => void;
   on_exit: () => void;
 };
@@ -65,6 +70,9 @@ const double_blink_gap_ms = 190;
 
 const rest_mouth_d = mouth_path(mood_shapes.idle);
 const rest_brow_transform = "translate(0 0)";
+// Evaluated once: the effect below is rebuilt several times per turn, and a
+// kiosk's reduced-motion setting does not change under it.
+const reduced_motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function next_blink_gap_ms(mood: face_mood): number {
   const base = 2200 + Math.random() * 3600;
@@ -166,8 +174,6 @@ export function face_view(props: face_view_props) {
     ) {
       throw new Error("face nodes were not mounted");
     }
-
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     let frame = 0;
     let last_ms = performance.now();
@@ -279,7 +285,12 @@ export function face_view(props: face_view_props) {
         }
       }
 
-      const next_subtitle = spoken === null ? "" : spoken.text;
+      const next_subtitle =
+        spoken === null
+          ? props.speech_pending
+            ? last_subtitle_ref.current
+            : ""
+          : spoken.text;
 
       if (next_subtitle !== last_subtitle_ref.current) {
         last_subtitle_ref.current = next_subtitle;
@@ -287,7 +298,7 @@ export function face_view(props: face_view_props) {
         set_subtitle(next_subtitle);
       }
 
-      if (reduced) {
+      if (reduced_motion) {
         return;
       }
 
@@ -334,7 +345,12 @@ export function face_view(props: face_view_props) {
     frame = window.requestAnimationFrame(step);
 
     return () => window.cancelAnimationFrame(frame);
-  }, [props.mood, props.audio_ref, props.speech_track_ref]);
+    // speech_pending is read inside the loop, so it has to be a dependency: the
+    // rAF closure is long-lived and a non-dependency prop would stay frozen at
+    // mount, making the flicker look intermittent rather than fixed. Rebuilding
+    // is free - it already happens on every mood change, and all interpolation
+    // state lives in refs.
+  }, [props.mood, props.speech_pending, props.audio_ref, props.speech_track_ref]);
 
   return (
     <div className="face_stage_wrap">

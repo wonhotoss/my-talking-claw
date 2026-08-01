@@ -95,6 +95,41 @@ h1 {
   background: #e0b93a;
 }
 
+/* Two independent indicators for two now-independent facts: the speaker lamp can
+   say 말하는 중 while the chip says the agent is still working. */
+.stream_dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #c2ccc8;
+}
+
+.stream_open {
+  background: #2f7fd1;
+}
+
+.stream_connecting {
+  background: #e0b93a;
+}
+
+.stream_closed {
+  background: #d1453b;
+}
+
+.turn_chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #cfdae6;
+  background: #eef4fb;
+  color: #35566f;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .speaker_lamp {
   display: inline-flex;
   align-items: center;
@@ -196,6 +231,23 @@ h1 {
 .system_error {
   color: #a23a27;
   font-weight: 700;
+}
+
+/* Progress the agent reported but never said out loud. Lighter than an agent
+   bubble so the eye can tell spoken from shown. */
+.notice_line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 92%;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #55707f;
+  font-size: 0.78rem;
+  font-style: italic;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .entry_time {
