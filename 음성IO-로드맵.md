@@ -27,7 +27,21 @@
 - 클로바 채택 시 **클로바 + RPi = 2기기** → my-talking-claw의 "RPi 단일 기기 통합" 목표와 상충. 얼굴을 RPi에 두기로 한 이상 이 분리는 수용.
 - 클로바 EOL(네이버 클라우드 종료)은 리퍼포즈엔 무해 — 자체 스택으로 대체하므로 오히려 사장될 하드웨어를 재활용하는 셈.
 
+## 2026-09-23 갱신 — 실구매 & 최종 아키텍처 확정
+
+**실구매 하드웨어:** AliExpress에서 **ReSpeaker Lite "Voice Assistant Kit"** 구매(약 45,100원). 구성 = ReSpeaker Lite 보드(XMOS XU316) + **XIAO ESP32S3 납땜** + **인클로즈드 모노 스피커**. 이건 "맨 USB 보드"가 아니라 ESP32 위성 버전이지만, 같은 보드라 **USB 펌웨어(`respeaker_lite_usb_xmos_v2.0.5.bin`)로 플래시하면 UAC2 USB 사운드카드로 계획대로 동작**한다. 수령 후 할 일: ① 보드 쪽 USB-C(XIAO 것과 혼동 금지)로 USB 펌웨어 플래시 ② 동봉 스피커 임피던스 확인(XU316은 4Ω 구동). XIAO ESP32S3는 USB 모드에선 잉여(예비 MCU·향후 위성 실험용). 가격상 맨 보드+스피커 별매(≈46,900원)와 같거나 저렴 + ESP32 덤.
+
+**최종 결정: USB-RPi + 자체 스택 확정. turnkey(ESP32+ESPHome+Home Assistant) 경로는 안 간다.** 근거(이번 세션 분석):
+- **STT/TTS는 어차피 호스트(RPi)에서 돈다.** 보드의 ESP32/XU316은 MCU라 Whisper·Piper·LLM을 못 올린다. turnkey든 아니든 무거운 연산은 별도 머신 필요 — 그 머신이 바로 우리 RPi다.
+- **웨이크워드 오프로드 이득이 미미하다.** USB 펌웨어의 XU316은 AEC·AGC·노이즈억제·간섭제거·VNR만 하고 **웨이크워드는 안 한다**(Seeed 공식). USB 모드에선 웨이크워드가 RPi의 openWakeWord로 돈다 — 그런데 이건 RPi4에서 80ms당 5ms 미만으로 사실상 공짜. 웨이크워드를 실리콘으로 떼는 건 ESP32 경로에서만 되고, 그건 HA·위성 아키텍처 전부를 딸려온다.
+- **정작 값진 AEC는 USB 모드에서 그냥 딸려온다.** 소프트웨어로 만들기 어려운 반향제거를 XU316이 하드웨어로 처리 → barge-in의 하드웨어 전제 확보. 리뷰어 자작(단일 마이크)이 실패했다 이 보드로 성공한 핵심.
+- **HA는 스마트홈 플랫폼 전체다.** Assist는 그 안의 음성 서브시스템일 뿐. 제어할 조명·센서가 없는 순수 음성 에이전트엔 과한 의존성. 우리가 쓰는 엔진(faster-whisper·Piper·openWakeWord)은 독립 부품이라 HA 없이 직접 엮으면 된다 — 현재 스택이 이미 그 방식.
+- **viseme 립싱크 유지.** turnkey 경로는 HA의 Piper가 phoneme alignment를 얼굴 렌더러에 안 넘겨줘 11.6ms 립싱크가 후퇴한다. 자체 TTS를 쥐고 있어야 [day-5](day-5.md)의 정밀 입모양이 산다.
+
+덕킹("음악 줄였다 응답 후 복원")은 turnkey에선 ESPHome 믹서(`mixer_speaker.apply_ducking`)+HA가 기성품으로 주지만, 자체 스택에선 RPi 음성 루프에 직접 구현한다(웨이크워드 감지→재생 볼륨 다운→STT·에이전트·TTS→복원). AEC가 하드웨어로 받쳐주므로 이 로직은 소량.
+
 ## 관련 문서
 - 하드웨어 비교·확정 BOM: [hardware-notes.md](hardware-notes.md)
 - 기기·TTS 엔진 결정: [platform-notes.md](platform-notes.md)
-- super-clova 발판/루팅 절차: `D:\projects\scratch\super-clova\발판확보-런북.md`, `경로분석.md`, `분해자료-조사.md`
+- 전체 상태·다음 할 일: [HANDOFF.md](HANDOFF.md)
+- 클로바 트랙(리버싱·분해·발판): [clova-track/](clova-track/) — 특히 [clova-track/발판확보-런북.md](clova-track/발판확보-런북.md), [clova-track/분해자료-조사.md](clova-track/분해자료-조사.md)
