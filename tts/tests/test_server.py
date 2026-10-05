@@ -101,3 +101,31 @@ def test_post_speak_maps_engine_failure_to_502(monkeypatch: pytest.MonkeyPatch) 
 
     assert response.status_code == 502
     assert "melotts alignment mismatch" in response.json()["detail"]
+
+
+def test_speak_requests_are_synthesized_one_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    in_flight = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def fake_speak(text: str) -> speech_result:
+        nonlocal in_flight, peak
+        with guard:
+            in_flight += 1
+            peak = max(peak, in_flight)
+        time.sleep(0.02)
+        with guard:
+            in_flight -= 1
+        return fake_speech
+
+    monkeypatch.setattr(server.engine, "speak", fake_speak)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda text: server.post_speak(server.speak_request(text=text)), ["하나", "둘", "셋", "넷"]))
+
+    assert len(results) == 4
+    assert peak == 1

@@ -5,3 +5,4 @@ server.log
 server.err.log
 __pycache__/
 .pytest_cache/
+tts/voices/

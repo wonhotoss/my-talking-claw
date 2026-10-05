@@ -1,4 +1,5 @@
 import base64
+import threading
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,6 +61,14 @@ app.add_middleware(
 
 engine = engine_for_environment()
 
+# One synthesis at a time. The engine's single onnxruntime session already uses
+# every core, so concurrent requests gain no throughput and only share the CPU:
+# on an RPi4, four sentences arriving together took the first one from 1.8s to
+# 6.2s while the total stayed at ~11s. Serialising keeps first-sound latency at
+# the single-request figure, and because the client fires its requests in
+# utterance order, FIFO here is utterance order.
+synthesis_lock = threading.Lock()
+
 
 @app.get("/health", response_model=health_response)
 def get_health() -> health_response:
@@ -74,7 +83,8 @@ def post_synthesize(request: synthesize_request) -> Response:
         raise HTTPException(status_code=400, detail="text must not be empty")
 
     try:
-        audio = engine.synthesize(text)
+        with synthesis_lock:
+            audio = engine.synthesize(text)
     except Exception as error:
         raise HTTPException(status_code=502, detail=f"tts failure: {error}")
 
@@ -95,7 +105,8 @@ def post_speak(request: speak_request) -> speak_response:
         raise HTTPException(status_code=400, detail="text must not be empty")
 
     try:
-        result = engine.speak(text)
+        with synthesis_lock:
+            result = engine.speak(text)
     except Exception as error:
         raise HTTPException(status_code=502, detail=f"tts failure: {error}")
 
