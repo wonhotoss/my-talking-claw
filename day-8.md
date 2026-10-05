@@ -120,7 +120,7 @@ voice를 `WHISPER_MODEL=voice/models/faster-whisper-tiny`(beam 5)로 재시작�
 
 이 판정이 바꾸는 것:
 - STT 선택 기준은 "정확도"가 아니라 **"LLM이 복원 가능한 수준의 오류 + 속도"**다. tiny의 단어 치환 오류(위 TTS 입력 비교)가 실사용에서는 치명적이지 않았다.
-- 따라서 tiny(RTF 0.5~0.9)가 base(RTF 1.0~1.7)보다 낫다. **베이스라인을 tiny로 바꾼다** — 런처 기본값 변경은 별도 작업(현재 `scripts/rpi-up.sh`의 `WHISPER_MODEL` 기본값은 `base`, 이 세션은 tmux 창에서 수동 재시작).
+- 따라서 tiny(RTF 0.5~0.9)가 base(RTF 1.0~1.7)보다 낫다. **베이스라인을 tiny로 바꾼다** — `scripts/rpi-up.sh`의 `WHISPER_MODEL` 기본값을 로컬 tiny 디렉터리로 바꿨다(없으면 기동 거부). `WHISPER_MODEL=base`로 되돌릴 수 있다.
 - 열 예산도 같이 준다: 턴당 STT 연산이 절반이다.
 - 한계: 고유명사·숫자처럼 LLM이 문맥으로 못 복원하는 토큰은 여전히 전사 품질에 달려 있다. 그런 턴이 반복되면 그때 base/beam을 되돌려 비교.
 

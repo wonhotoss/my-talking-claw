@@ -7,6 +7,8 @@
 #
 # Deviations from README defaults, all forced by this machine:
 #   - agent-gateway on :3001 — the real nullclaw gateway already owns :3000 (HANDOFF "포트 3000 주의").
+#   - whisper defaults to the local tiny model dir (day-8 user verdict: the LLM repairs garbled
+#     transcripts, so tiny's 2x speed wins). WHISPER_MODEL=base or a HF name still works.
 #   - tts runs natively (no Docker on this RPi) with the env values from tts/docker-compose.yml `piper`.
 #   - CLAUDE_WORKDIR is an empty dir outside the repo: --allowedTools is not a sandbox (README warning).
 set -euo pipefail
@@ -18,7 +20,7 @@ export PATH="$HOME/.local/bin:$PATH"
 gateway_port="${GATEWAY_PORT:-3001}"
 push_token="${PUSH_TOKEN:-day8-push}"
 claude_workdir="${CLAUDE_WORKDIR:-$HOME/claw-home}"
-whisper_model="${WHISPER_MODEL:-base}"
+whisper_model="${WHISPER_MODEL:-$repo/voice/models/faster-whisper-tiny}"
 
 health() {
   for pair in "backend http://127.0.0.1:8000/health" \
@@ -45,6 +47,7 @@ fi
 
 mkdir -p "$claude_workdir"
 [ -f "$repo/tts/voices/ko_KR-kss-medium-aligned.onnx" ] || { echo "missing patched piper voice: run the tts setup in HANDOFF.md §설치 순서 2"; exit 1; }
+[ -f "$whisper_model/model.bin" ] || [ "$whisper_model" = "${whisper_model#/}" ] || { echo "missing whisper model dir: $whisper_model (day-8.md \"whisper tiny 비교\" — curl -C - model.bin)"; exit 1; }
 
 tmux new-session -d -s "$session" -n tts -c "$repo/tts"
 tmux send-keys -t "$session:tts" \
