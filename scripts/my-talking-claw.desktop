@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=My Talking Claw
+Comment=Start the voice stack + face kiosk (scripts/rpi-up.sh); close with "rpi-up.sh down"
+Exec=lxterminal --title "my-talking-claw" -e bash -c "/home/hahahoho/Documents/my-talking-claw/scripts/rpi-up.sh; tmux attach -t claw"
+Terminal=false
+Icon=audio-headset
+Categories=Utility;

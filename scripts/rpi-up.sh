@@ -1,26 +1,43 @@
 #!/usr/bin/env bash
-# Day-8 launcher: the whole server stack on one RPi, one tmux session, five windows.
+# Day-8/9 launcher: the whole stack on one RPi, one tmux session, one window per service,
+# plus the Chromium kiosk showing the face on the RPi display.
 #
 #   scripts/rpi-up.sh          start (or re-attach to) the stack
 #   scripts/rpi-up.sh health   curl every /health
-#   scripts/rpi-up.sh down     kill the tmux session (and every service with it)
+#   scripts/rpi-up.sh down     kill the tmux session (and every service with it), restore screen blanking
 #
 # Deviations from README defaults, all forced by this machine:
 #   - agent-gateway on :3001 — the real nullclaw gateway already owns :3000 (HANDOFF "포트 3000 주의").
-#   - whisper defaults to the local tiny model dir (day-8 user verdict: the LLM repairs garbled
-#     transcripts, so tiny's 2x speed wins). WHISPER_MODEL=base or a HF name still works.
+#   - whisper defaults to base + beam 1 (day-9 decision, see day-9.md "STT 모델 결정": on ReSpeaker
+#     input tiny hallucinates and then pays a 40-50s temperature-fallback tail; base beam 1 is
+#     accurate with no tail at RTF 0.65-0.74). WHISPER_MODEL=<local dir> / WHISPER_BEAM_SIZE override.
 #   - tts runs natively (no Docker on this RPi) with the env values from tts/docker-compose.yml `piper`.
 #   - CLAUDE_WORKDIR is an empty dir outside the repo: --allowedTools is not a sandbox (README warning).
+#   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
+#   - kiosk: Chromium on labwc/Wayland (day-9.md "키오스크 1단계" for why each flag is there).
+#     Screen blanking (swayidle from ~/.config/labwc/autostart) is stopped while the stack runs and
+#     restarted on `down`; a reboot restores the default by itself.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 session="claw"
 export PATH="$HOME/.local/bin:$PATH"
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 gateway_port="${GATEWAY_PORT:-3001}"
 push_token="${PUSH_TOKEN:-day8-push}"
 claude_workdir="${CLAUDE_WORKDIR:-$HOME/claw-home}"
-whisper_model="${WHISPER_MODEL:-$repo/voice/models/faster-whisper-tiny}"
+whisper_model="${WHISPER_MODEL:-base}"
+whisper_beam_size="${WHISPER_BEAM_SIZE:-1}"
+kiosk_profile="$HOME/.config/claw-kiosk"
+# role=viewer: the kiosk draws only; audio/ owns the microphone and the speaker.
+kiosk_url="${KIOSK_URL:-https://localhost:5173/#/face?role=viewer}"
+playback_gain_db="${AUDIO_PLAYBACK_GAIN_DB:--12}"
+# PortAudio's default output here is the bcm2835 headphone jack; name the ReSpeaker on both sides.
+audio_device="${AUDIO_DEVICE:-ReSpeaker}"
+audio_dump_dir="${AUDIO_DUMP_DIR:-$HOME/claw-recordings}"
+wake_word_model="${WAKE_WORD_MODEL:-hey_jarvis,alexa,hey_mycroft}"
 
 health() {
   for pair in "backend http://127.0.0.1:8000/health" \
@@ -31,11 +48,28 @@ health() {
     printf '%-8s %s\n' "$1" "$(curl -s -m 5 "$2" || echo '(down)')"
   done
   printf '%-8s %s\n' frontend "$(curl -sk -m 5 -o /dev/null -w '%{http_code}' https://127.0.0.1:5173/ || echo '(down)')"
+  printf '%-8s %s\n' kiosk "$(pgrep -f "user-data-dir=$kiosk_profile" >/dev/null && echo running || echo '(down)')"
+  printf '%-8s %s\n' audio "$(pgrep -f "python -m app.main" >/dev/null && echo running || echo '(down)')"
+}
+
+screen_keep_on() {
+  pkill -x swayidle || true
+  wlopm --on '*' >/dev/null 2>&1 || true
+}
+
+screen_restore_blanking() {
+  # Same line as ~/.config/labwc/autostart, so `down` leaves the desktop as a reboot would.
+  pgrep -x swayidle >/dev/null || setsid swayidle -w timeout 600 'wlopm --off *' resume 'wlopm --on *' >/dev/null 2>&1 < /dev/null &
 }
 
 case "${1:-up}" in
   health) health; exit 0 ;;
-  down)   tmux kill-session -t "$session" 2>/dev/null && echo "stopped" || echo "not running"; exit 0 ;;
+  down)
+    pkill -f "user-data-dir=$kiosk_profile" || true
+    pkill -f "python -m app.main" || true
+    tmux kill-session -t "$session" 2>/dev/null && echo "stopped" || echo "not running"
+    screen_restore_blanking
+    exit 0 ;;
   up) ;;
   *) echo "usage: $0 [up|health|down]"; exit 2 ;;
 esac
@@ -45,9 +79,16 @@ if tmux has-session -t "$session" 2>/dev/null; then
   exec tmux attach -t "$session"
 fi
 
-mkdir -p "$claude_workdir"
+mkdir -p "$claude_workdir" "$audio_dump_dir"
 [ -f "$repo/tts/voices/ko_KR-kss-medium-aligned.onnx" ] || { echo "missing patched piper voice: run the tts setup in HANDOFF.md §설치 순서 2"; exit 1; }
 [ -f "$whisper_model/model.bin" ] || [ "$whisper_model" = "${whisper_model#/}" ] || { echo "missing whisper model dir: $whisper_model (day-8.md \"whisper tiny 비교\" — curl -C - model.bin)"; exit 1; }
+
+# A fresh Chromium profile offers Google Translate over the face; neither --lang nor
+# --disable-features=Translate suppresses it on this build, the profile preference does.
+if [ ! -f "$kiosk_profile/Default/Preferences" ]; then
+  mkdir -p "$kiosk_profile/Default"
+  printf '%s' '{"translate":{"enabled":false},"intl":{"accept_languages":"ko-KR,ko"}}' > "$kiosk_profile/Default/Preferences"
+fi
 
 tmux new-session -d -s "$session" -n tts -c "$repo/tts"
 tmux send-keys -t "$session:tts" \
@@ -57,7 +98,7 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 8201" C-m
 
 tmux new-window -t "$session" -n voice -c "$repo/voice"
 tmux send-keys -t "$session:voice" \
-  "WHISPER_MODEL=$whisper_model uv run uvicorn app.server:app --host 127.0.0.1 --port 8100" C-m
+  "WHISPER_MODEL=$whisper_model WHISPER_BEAM_SIZE=$whisper_beam_size uv run uvicorn app.server:app --host 127.0.0.1 --port 8100" C-m
 
 tmux new-window -t "$session" -n gateway -c "$repo/agent-gateway"
 tmux send-keys -t "$session:gateway" \
@@ -73,9 +114,20 @@ uv run uvicorn app.server:app --host 0.0.0.0 --port 8000" C-m
 tmux new-window -t "$session" -n frontend -c "$repo/frontend"
 tmux send-keys -t "$session:frontend" "npm run dev" C-m
 
+tmux new-window -t "$session" -n audio -c "$repo/audio"
+tmux send-keys -t "$session:audio"   "until curl -s -m 2 -o /dev/null http://127.0.0.1:8000/health && curl -s -m 2 -o /dev/null http://127.0.0.1:8201/health; do sleep 1; done; PUSH_TOKEN=$push_token AUDIO_INPUT_DEVICE=$audio_device AUDIO_OUTPUT_DEVICE=$audio_device AUDIO_DUMP_DIR=$audio_dump_dir AUDIO_PLAYBACK_GAIN_DB=$playback_gain_db WAKE_WORD_MODEL=$wake_word_model uv run python -m app.main" C-m
+
+screen_keep_on
+tmux new-window -t "$session" -n kiosk -c "$HOME"
+tmux send-keys -t "$session:kiosk" \
+  "until curl -sk -m 2 -o /dev/null https://127.0.0.1:5173/; do sleep 1; done; \
+LANGUAGE=ko LANG=ko_KR.UTF-8 chromium --kiosk --ozone-platform=wayland --lang=ko --password-store=basic \
+--ignore-certificate-errors --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
+--noerrdialogs --disable-infobars --user-data-dir=$kiosk_profile '$kiosk_url' 2>&1 | grep -v -E '^\\[|GPU|dbus'" C-m
+
 tmux new-window -t "$session" -n shell -c "$repo"
 tmux send-keys -t "$session:shell" "sleep 8; $repo/scripts/rpi-up.sh health; hostname -I" C-m
 
-echo "started tmux session '$session' (windows: tts voice gateway backend frontend shell)"
-echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   CLAUDE_WORKDIR=$claude_workdir"
+echo "started tmux session '$session' (windows: tts voice gateway backend frontend audio kiosk shell)"
+echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   CLAUDE_WORKDIR=$claude_workdir   whisper=$whisper_model beam=$whisper_beam_size"
 echo "attach: tmux attach -t $session     phone: https://$(hostname -I | awk '{print $1}'):5173"
