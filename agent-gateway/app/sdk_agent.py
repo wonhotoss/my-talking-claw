@@ -19,6 +19,8 @@ a client disconnect into an interrupt rather than a kill.
 """
 
 import asyncio
+import contextlib
+import dataclasses
 import datetime
 import json
 import os
@@ -31,12 +33,14 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ResultMessage,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     ToolUseBlock,
 )
 
 from app.claude_agent import agent_line
+from app.sentences import sentence_splitter
 
 weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -55,30 +59,154 @@ def stamp(message: str, now: datetime.datetime) -> str:
     return f"[지금 {now:%Y-%m-%d} ({weekday_names[now.weekday()]}) {now:%H:%M}]\n{message}"
 
 
+def reply(text: str) -> agent_line:
+    return agent_line(type="reply", text=text, kind=None)
+
+
+class turn_translator:
+    """SDK messages of one turn -> NDJSON lines, sentence by sentence.
+
+    With include_partial_messages on, text arrives twice: as StreamEvent deltas
+    while the model writes, and again inside the completed AssistantMessage. The
+    deltas are what gets spoken (a sentence goes out as soon as it ends); the
+    AssistantMessage then contributes only tool-use notices. If no delta was
+    seen for a message (the CLI decided not to stream it), its text blocks are
+    spoken from the message itself, so nothing is ever lost.
+    """
+
+    def __init__(self) -> None:
+        self.splitter = sentence_splitter()
+        self.streamed = False
+
+    def on(self, message: object) -> list[agent_line]:
+        if isinstance(message, StreamEvent):
+            # Subagent output is not the device's voice.
+            if message.parent_tool_use_id is not None:
+                return []
+
+            event = message.event
+
+            if event.get("type") == "content_block_delta" and event["delta"].get("type") == "text_delta":
+                self.streamed = True
+
+                return [reply(sentence) for sentence in self.splitter.feed(event["delta"]["text"])]
+
+            if event.get("type") == "content_block_stop":
+                rest = self.splitter.flush()
+
+                return [reply(rest)] if rest is not None else []
+
+            return []
+
+        if isinstance(message, AssistantMessage):
+            lines: list[agent_line] = []
+
+            for block in message.content:
+                if isinstance(block, TextBlock) and not self.streamed:
+                    text = block.text.strip()
+
+                    if text != "":
+                        lines.append(reply(text))
+                elif isinstance(block, ToolUseBlock):
+                    lines.append(agent_line(type="notice", text=block.name, kind="tool_use"))
+                # Thinking and tool results: neither speech nor progress.
+
+            # The next assistant message (after a tool call) starts clean.
+            self.streamed = False
+
+            return lines
+
+        if isinstance(message, ResultMessage):
+            if message.is_error:
+                return [agent_line(type="error", text=f"claude: {message.subtype}", kind=None)]
+
+            return [agent_line(type="done", text="", kind=None)]
+
+        return []
+
+
 def translate_message(message: object) -> list[agent_line]:
-    """One SDK message -> zero or more NDJSON lines. Pure, so it is testable."""
-    if isinstance(message, AssistantMessage):
-        lines: list[agent_line] = []
+    """One SDK message in isolation (no streaming state). Kept for tests."""
+    return turn_translator().on(message)
 
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                text = block.text.strip()
 
-                if text != "":
-                    lines.append(agent_line(type="reply", text=text, kind=None))
-            elif isinstance(block, ToolUseBlock):
-                lines.append(agent_line(type="notice", text=block.name, kind="tool_use"))
-            # Thinking and tool results: neither speech nor progress.
+@dataclasses.dataclass(frozen=True)
+class wait_notice:
+    """Spoken when the brain has said nothing for `after_seconds` into a turn.
 
-        return lines
+    The model cannot announce that it is about to think for a long time - it only
+    speaks once the thinking is done - so the host fills the silence. Configured
+    by the operator in <home>/host.json; absent means never.
+    """
 
-    if isinstance(message, ResultMessage):
-        if message.is_error:
-            return [agent_line(type="error", text=f"claude: {message.subtype}", kind=None)]
+    after_seconds: float
+    text: str
 
-        return [agent_line(type="done", text="", kind=None)]
 
-    return []
+def read_wait_notice(home: Path) -> wait_notice | None:
+    host_file = home / "host.json"
+
+    if not host_file.exists():
+        return None
+
+    config = json.loads(host_file.read_text(encoding="utf-8"))
+
+    if "wait_notice" not in config:
+        return None
+
+    return wait_notice(after_seconds=float(config["wait_notice_seconds"]), text=config["wait_notice"])
+
+
+async def relay(
+    messages: AsyncIterator[object],
+    translator: turn_translator,
+    notice: wait_notice | None,
+) -> AsyncIterator[agent_line]:
+    """Translate a turn's messages, inserting the wait notice if the first
+    reply is late. The SDK stream is read by a helper task so the wait can time
+    out without cancelling the generator underneath it."""
+    queue: asyncio.Queue[object | None] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for message in messages:
+                await queue.put(message)
+        finally:
+            await queue.put(None)
+
+    pumping = asyncio.create_task(pump())
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    replied = False
+    notified = False
+
+    try:
+        while True:
+            timeout = None
+
+            if notice is not None and not replied and not notified:
+                timeout = max(notice.after_seconds - (loop.time() - started), 0.0)
+
+            try:
+                message = await asyncio.wait_for(queue.get(), timeout)
+            except asyncio.TimeoutError:
+                notified = True
+                yield reply(notice.text)
+                continue
+
+            if message is None:
+                return
+
+            for line in translator.on(message):
+                if line.type == "reply":
+                    replied = True
+
+                yield line
+    finally:
+        pumping.cancel()
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await pumping
 
 
 def read_session_id(session_file: Path) -> str | None:
@@ -151,6 +279,7 @@ class sdk_agent:
         self.cli_path = os.environ.get("CLAUDE_BIN", "") or None
         self.model = os.environ.get("CLAUDE_MODEL", "") or None
         self.session_file = self.home / "session.json"
+        self.wait_notice = read_wait_notice(self.home)
         self.client: ClaudeSDKClient | None = None
         # One turn at a time: the session is a single conversation.
         self.lock = asyncio.Lock()
@@ -186,6 +315,8 @@ class sdk_agent:
             # own ~/.claude - the brain must not inherit a developer's tool rules.
             setting_sources=["project"],
             resume=resume,
+            # Sentence-level early output: text deltas while the model writes.
+            include_partial_messages=True,
             stderr=lambda line: log(f"cli: {line.rstrip()[:300]}"),
         )
 
@@ -218,28 +349,43 @@ class sdk_agent:
             await client.query(stamp(message, datetime.datetime.now()))
 
             try:
-                async for sdk_message in client.receive_response():
-                    if isinstance(sdk_message, SystemMessage) and sdk_message.subtype == "init":
-                        log(
-                            f"init session={sdk_message.data.get('session_id')} "
-                            f"model={sdk_message.data.get('model')} "
-                            f"tools={len(sdk_message.data.get('tools', []))}"
-                        )
-
-                    if isinstance(sdk_message, ResultMessage):
-                        write_session_id(self.session_file, sdk_message.session_id)
-                        log(
-                            f"turns={sdk_message.num_turns} duration_ms={sdk_message.duration_ms} "
-                            f"api_ms={sdk_message.duration_api_ms} cost_usd={sdk_message.total_cost_usd}"
-                        )
-
-                    for line in translate_message(sdk_message):
-                        yield line
+                async for line in relay(self.observe(client.receive_response()), turn_translator(), self.wait_notice):
+                    yield line
             except asyncio.CancelledError:
                 # The backend dropped us (barge-in). Stop the turn, keep the session.
                 log("turn cancelled by the client; interrupting")
                 await asyncio.shield(self.interrupt_and_drain(client))
                 raise
+
+    async def observe(self, messages: AsyncIterator[object]) -> AsyncIterator[object]:
+        """Pass-through that logs the init and result and persists the session id."""
+        started = asyncio.get_running_loop().time()
+        deltas = 0
+        first_delta_ms = None
+
+        async for sdk_message in messages:
+            if isinstance(sdk_message, StreamEvent) and sdk_message.event.get("type") == "content_block_delta":
+                deltas += 1
+
+                if first_delta_ms is None:
+                    first_delta_ms = int((asyncio.get_running_loop().time() - started) * 1000)
+
+            if isinstance(sdk_message, SystemMessage) and sdk_message.subtype == "init":
+                log(
+                    f"init session={sdk_message.data.get('session_id')} "
+                    f"model={sdk_message.data.get('model')} "
+                    f"tools={len(sdk_message.data.get('tools', []))}"
+                )
+
+            if isinstance(sdk_message, ResultMessage):
+                write_session_id(self.session_file, sdk_message.session_id)
+                log(
+                    f"turns={sdk_message.num_turns} duration_ms={sdk_message.duration_ms} "
+                    f"api_ms={sdk_message.duration_api_ms} cost_usd={sdk_message.total_cost_usd} "
+                    f"deltas={deltas} first_delta_ms={first_delta_ms}"
+                )
+
+            yield sdk_message
 
     async def interrupt_and_drain(self, client: ClaudeSDKClient) -> None:
         await client.interrupt()

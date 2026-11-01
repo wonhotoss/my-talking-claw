@@ -20,6 +20,7 @@ trusted"). 그러면 두뇌가 `memory.md`도 `schedule/`도 못 쓰고 턴마�
 | `persona.md` | **성격·말투·이름·호칭** — `@persona.md`로 자동 포함 | **두뇌(사용자가 말로)**, 관리자 | 두뇌가 고친 건 그 자리에서; 관리자가 고친 건 새 세션부터 |
 | `memory.md` | **사용자에 대한 기억** — `@memory.md`로 자동 포함 | **두뇌(사용자가 말로)**, 관리자 | 같음 |
 | `system-prompt.md` | 최소 시스템 프롬프트(선택) | 관리자 | 새 세션부터 |
+| `host.json` | 호스트 동작(선택): `wait_notice_seconds`·`wait_notice` — 첫 문장이 그 시간 안에 안 나오면 호스트가 끼워 넣는 한 문장 | 관리자 | 게이트웨이 재시작 |
 | `.claude/settings.json` | 모델·권한 모드·허용/금지 도구 | 관리자 | 게이트웨이 재시작 |
 | `schedule/*.json` | 나중에 할 일 | 두뇌(Write), 관리자 | 스케줄러 다음 폴링(기본 5초) |
 | `session.json` | 세션 id | 게이트웨이 | 런타임. 지우면 새 세션 |
