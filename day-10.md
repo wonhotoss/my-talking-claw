@@ -114,6 +114,22 @@
 - 끼어들기에서 2.2초 동안 받은 줄이 0개였다: 긴 답은 `AssistantMessage` 블록이 **완성될 때** 한 번에 온다. 문장 단위 선출력(`include_partial_messages`)은 첫 소리 지연에 직결되는 다음 항목(미룸, 아래).
 - 데스크탑 함정: npm의 `claude.exe`가 오늘 **500바이트 텍스트 스텁**("claude native binary not installed")으로 바뀌어 있었다(사용자가 집에서 `claude`를 연 16:33에 자동 갱신된 것으로 보임). `cli_path`에 그걸 주면 WinError 216. **SDK 두뇌는 `CLAUDE_BIN`을 비워 두면 CLI를 스스로 찾는다** — 그게 동작했다. `cli` 두뇌(`claude_agent.py`)는 이 데스크탑에서 `CLAUDE_BIN`을 네이티브 바이너리로 다시 잡아야 한다.
 
+### 데스크탑 전체 스택 + 폰 실사용 (2026-11-01 16:45~17:00, 사용자)
+
+backend·voice(base beam 1)·tts(Piper, Docker)·frontend를 데스크탑에, 게이트웨이만 `sdk`. 폰은 day-7 방식(탭 녹음)이라 웨이크워드·말 끝 자동 판정은 없음 — 그건 RPi 오디오 루프의 몫.
+
+| 항목 | 로그 |
+| --- | --- |
+| 턴 | `/api/turns` 6회(STT 5회), 게이트웨이 duration **1.8 / 2.4 / 2.8 / 2.9 / 3.3 / 6.7s**(6.7s는 3턴짜리 = 도구 사용 포함). 오류 0, `failed/` 0 |
+| 예약 | "1분 후에 불러줘"(16:53) → `schedule/1654-call-user.json` `{"at":"…16:54:00","say":"원호님, 부르셨죠. 일 분 지났어요."}` → **16:54 스케줄러 발사 → `/api/push` 202 → 폰에서 재생.** 기억한 이름을 호출 문장에 썼다 |
+| 기억 | `memory.md`에 "사용자의 집은 태형 아파트다" 추가 |
+| 세션 | 같은 세션(`a3c5ce10`)이 실기 1·2·폰까지 이어짐. `api_ms` 누적 29s(세션 누적값, day-8과 같은 읽기 주의) |
+| 사전 확인 | 백엔드 경유 "지금 몇 시야?" → 4.1s에 "지금은 오후 네 시 사십육 분이에요" — 숫자를 한국어로 읽는 규칙이 TTS 앞단에서 지켜짐 |
+
+**RPi 성능 검토용 데스크탑 측정(상주 CLI 프로세스).** 게이트웨이가 띄운 `claude` 프로세스(16:46 시작): **RSS 224MB**, 15분·6턴 동안 **CPU 누적 5.8초** → 유휴 CPU는 사실상 0. 스폰 방식은 턴마다 node 기동이었으니 CPU는 오히려 줄고, 메모리 ~250MB가 상시 추가된다(RPi used 1.5GB + 0.25 → 4GB에서 여유). RPi 전환의 걸림돌은 메모리·CPU가 아니라 **aarch64 SDK 휠**과 **집 신뢰 수락** 두 가지 절차다.
+
+사용자 체감(첫 소리·첫 문장 길이·숫자 읽기)은 아래 "남은 것"에 받아 적는다.
+
 ## 미룬 개선 (deferred)
 - **문장 단위 선출력** — 현재: 텍스트 블록 완성 후 한 번에. 측정됨: 긴 답에서 2.2초 동안 0줄. 왜 안 했나: 백엔드 분할기와의 경계를 정해야 한다(델타를 어디서 문장으로 자르나). 착수 지점: `sdk_agent.py` `options()`에 `include_partial_messages=True`, `translate_message`에 `StreamEvent`(`content_block_delta`/`text_delta`) 누적 후 문장 경계에서 `reply`.
 - **RPi 전환** — 현재 `AGENT_BRAIN` 기본 `cli`. 왜 안 했나: 사용자 요청(성능 영향 검토 먼저). 착수 지점: RPi에서 `uv sync`(SDK 휠 aarch64 확인), `~/claw-home`에 템플릿 복사 + `claude` 신뢰 수락, `rpi-up.sh` gateway 창에 `AGENT_BRAIN=sdk BRAIN_HOME=$HOME/claw-home`. 재야 할 것: node 상주 RSS·유휴 CPU, 턴 지연 before/after.
