@@ -271,3 +271,52 @@ def test_push_with_a_prompt_runs_an_unsolicited_agent_turn(
     # Server-generated: an unsolicited turn has no client to name it.
     assert response.json()["turn_id"].startswith("t_")
     assert seen == [("agent", "7시라고 알려줘")]
+
+
+def test_device_events_require_the_push_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "push_token", "secret")
+
+    response = client.post("/api/device", json={"kind": "device_state", "phase": "listening"})
+
+    assert response.status_code == 401
+
+
+def test_device_events_are_published_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "push_token", "secret")
+    bus = fresh_bus(monkeypatch)
+
+    response = client.post(
+        "/api/device",
+        json={
+            "kind": "speech_started",
+            "turn_id": "t_1",
+            "seq": 0,
+            "started_at": 3.0,
+            "track": {
+                "duration": 1.0,
+                "visemes": [{"start": 0.0, "end": 0.5, "viseme": "a"}],
+                "segments": [{"start": 0.0, "end": 1.0, "text": "안녕"}],
+                "envelope": [0.2, 0.8],
+                "envelope_hz": 2,
+            },
+        },
+        headers={"X-Push-Token": "secret"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"seq": 1}
+    assert [event.kind for _, event in bus.recent] == ["speech_started"]
+    assert bus.recent[0][1].track.visemes[0].viseme == "a"
+
+
+def test_device_events_reject_an_unknown_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "push_token", "secret")
+
+    response = client.post(
+        "/api/device",
+        json={"kind": "utterance", "turn_id": "t_1", "seq": 0, "text": "안녕"},
+        headers={"X-Push-Token": "secret"},
+    )
+
+    # The loop reports device state only; turn events stay the runner's.
+    assert response.status_code == 422

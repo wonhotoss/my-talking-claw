@@ -198,3 +198,21 @@ async def post_push(
     return turn_accepted(
         turn_id=await runner.start_prompt(request.source, prompt, new_turn_id())
     )
+
+
+class device_accepted(BaseModel):
+    seq: int
+
+
+@app.post("/api/device", status_code=202, response_model=device_accepted)
+def post_device(
+    event: events.device_event,
+    _: None = Depends(require_push_token),
+) -> device_accepted:
+    """The audio loop reports what the device is doing; the bus fans it out.
+
+    Same token as /api/push: both are "something on the LAN that is allowed to
+    drive this device". The payload is one of the device_* events verbatim, so
+    the loop and the viewers share one schema and the backend adds nothing.
+    """
+    return device_accepted(seq=bus.publish(event))

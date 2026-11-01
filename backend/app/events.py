@@ -106,6 +106,61 @@ class error_event(BaseModel):
     message: str
 
 
+# Day-9: the audio loop (audio/) owns the microphone and the speaker on the
+# device. The three events below are how it tells the viewers - the kiosk face
+# and the phone - what it is doing, so they can draw without owning any audio.
+device_phase = Literal["idle", "listening", "recording", "transcribing", "speaking"]
+
+
+class viseme_segment(BaseModel):
+    start: float
+    end: float
+    viseme: str
+
+
+class speech_segment(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class speech_track(BaseModel):
+    """The lip-sync timeline exactly as the tts service's /speak returned it."""
+
+    duration: float
+    visemes: list[viseme_segment]
+    segments: list[speech_segment]
+    envelope: list[float]
+    envelope_hz: int
+
+
+class device_state_event(BaseModel):
+    kind: Literal["device_state"]
+    phase: device_phase
+
+
+class speech_started_event(BaseModel):
+    """The loop began playing one utterance; viewers animate the mouth from track.
+
+    started_at is the loop's wall clock. Viewer and loop share the device, so a
+    viewer anchors the track at receipt time rather than translating clocks.
+    """
+
+    kind: Literal["speech_started"]
+    turn_id: str
+    seq: int
+    started_at: float
+    track: speech_track
+
+
+class speech_ended_event(BaseModel):
+    kind: Literal["speech_ended"]
+    turn_id: str
+    seq: int
+
+
+device_event = device_state_event | speech_started_event | speech_ended_event
+
 stream_event = (
     stream_hello_event
     | turn_started_event
@@ -114,6 +169,9 @@ stream_event = (
     | turn_cancelling_event
     | turn_ended_event
     | error_event
+    | device_state_event
+    | speech_started_event
+    | speech_ended_event
 )
 
 

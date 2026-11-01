@@ -4,6 +4,16 @@ import json
 from app import events
 
 
+def a_track() -> events.speech_track:
+    return events.speech_track(
+        duration=1.0,
+        visemes=[events.viseme_segment(start=0.0, end=0.5, viseme="a")],
+        segments=[events.speech_segment(start=0.0, end=1.0, text="안녕")],
+        envelope=[0.2, 0.8],
+        envelope_hz=2,
+    )
+
+
 def an_utterance(text: str) -> events.utterance_event:
     return events.utterance_event(kind="utterance", turn_id="t_1", seq=0, text=text)
 
@@ -72,10 +82,40 @@ def test_wire_keys_are_locked_per_event_kind() -> None:
             events.error_event(kind="error", turn_id="t_1", message="터졌다"),
             {"kind", "turn_id", "message"},
         ),
+        (
+            events.device_state_event(kind="device_state", phase="listening"),
+            {"kind", "phase"},
+        ),
+        (
+            events.speech_started_event(
+                kind="speech_started",
+                turn_id="t_1",
+                seq=0,
+                started_at=3.0,
+                track=a_track(),
+            ),
+            {"kind", "turn_id", "seq", "started_at", "track"},
+        ),
+        (
+            events.speech_ended_event(kind="speech_ended", turn_id="t_1", seq=0),
+            {"kind", "turn_id", "seq"},
+        ),
     ]
 
     for event, expected in samples:
         assert set(json.loads(event.model_dump_json()).keys()) == expected
+
+
+def test_speech_track_keys_match_the_tts_speak_response() -> None:
+    # audio/ forwards the tts service's /speak fields verbatim and the face
+    # reads them by these names (speech_track.ts).
+    assert set(json.loads(a_track().model_dump_json()).keys()) == {
+        "duration",
+        "visemes",
+        "segments",
+        "envelope",
+        "envelope_hz",
+    }
 
 
 def test_turn_snapshot_keys_are_locked() -> None:
