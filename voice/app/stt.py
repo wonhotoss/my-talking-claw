@@ -21,6 +21,8 @@ class stt_engine:
     - WHISPER_DEVICE        (default cpu; cuda on a GPU machine)
     - WHISPER_COMPUTE_TYPE  (default int8; float16 on cuda)
     - WHISPER_LANGUAGE      (default ko; fallback when a request omits language)
+    - WHISPER_BEAM_SIZE     (default 5, faster-whisper's own; 1 is ~25-35% faster
+                             on RPi4 — day-8/day-9 measurements)
     """
 
     def __init__(self) -> None:
@@ -32,6 +34,7 @@ class stt_engine:
         # yielding empty transcriptions (the /transcribe 422). Enable with
         # WHISPER_VAD=true if silence hallucinations become a problem.
         self.vad_filter = os.environ.get("WHISPER_VAD", "false").lower() == "true"
+        self.beam_size = int(os.environ.get("WHISPER_BEAM_SIZE", "5"))
         # Loading the model is expensive, so it is cached lazily on first use.
         # This is the performance-critical exception to the no-cached-state rule.
         self._model: WhisperModel | None = None
@@ -52,6 +55,7 @@ class stt_engine:
             audio_path,
             language=language,
             vad_filter=self.vad_filter,
+            beam_size=self.beam_size,
         )
 
         text = "".join(segment.text for segment in segments).strip()
