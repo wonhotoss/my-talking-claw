@@ -97,6 +97,7 @@ curl http://localhost:8100/health
 | `WHISPER_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
 | `WHISPER_COMPUTE_TYPE` | `int8` | GPU에서는 `float16` 권장. |
 | `WHISPER_LANGUAGE` | `ko` | 요청이 언어를 지정하지 않을 때의 기본 언어. |
+| `WHISPER_BEAM_SIZE` | `5` | faster-whisper 기본값. RPi4 운영은 `1`(day-9 결정 — `scripts/rpi-up.sh`가 넘긴다). 25~35% 빠르고 사람 발화 정확도 차이 없음. |
 
 `base`는 가볍고 CPU에서도 빠르다. 더 높은 정확도가 필요하면 `WHISPER_MODEL=large-v3`로 실행한다(최초 약 3GB 다운로드, CPU에서는 느림).
 
@@ -300,6 +301,58 @@ chromium --kiosk --ignore-certificate-errors \
 day-7부터 한 턴이 문장 여러 개로 나뉘어 도착하므로, 발화 사이에 `<audio>`의 소스를 바꾸는
 ~90ms 창이 생긴다(실측). 그 동안 자막이 상태 라벨로 번쩍이지 않도록 마지막 자막을 유지한다.
 
+#### 뷰어 역할 (`#/face?role=viewer`, day-9)
+
+RPi 키오스크용. **녹음도 재생도 하지 않고 그리기만 한다.** 마이크와 스피커는 아래
+[오디오 루프](#오디오-루프-audio-day-9)가 쥐고, 얼굴은 루프가 보내는 `device_state`로 표정·라벨을,
+`speech_started`의 viseme 트랙으로 입을 그린다. 트랙은 이벤트가 도착한 순간의 자기 시계에
+고정한다(같은 기기라 루프의 첫 샘플과 수 ms 차이). 탭은 아무것도 하지 않는다 — 트리거는
+웨이크워드다. `role`이 없으면 지금까지의 폰 동작(녹음·재생·립싱크 전부 브라우저) 그대로다.
+
+### 오디오 루프 (`audio/`, day-9)
+
+기기에 상주하며 **마이크와 스피커를 소유하는** Python 루프다. 브라우저는 뷰어로 내려간다.
+이유는 [day-9.md](day-9.md) "2단계 설계": 웨이크워드·VAD·덕킹은 캡처와 재생이 한 프로세스에
+있어야 하고, 소프트웨어 AEC는 재생 PCM을 reference로 넘겨야 하며, 스피커가 외부 기기(클로바
+등)가 되면 브라우저는 거기로 소리를 못 보낸다.
+
+```
+ReSpeaker ──16k──► 캡처 → 웨이크워드(openWakeWord) → VAD 엔드포인팅 → POST /voice/transcribe → POST /api/turns
+             ◄──── GET /api/events(SSE): utterance → POST /tts/speak → 리샘플·-12dB → PortAudio 재생
+                    POST /api/device {device_state | speech_started{track} | speech_ended} (X-Push-Token)
+```
+
+```bash
+cd audio
+uv sync
+PUSH_TOKEN=... uv run python -m app.main
+```
+
+RPi엔 `libportaudio2`(apt)가 필요하다. 첫 실행에 openWakeWord 모델(~5MB)을 받는다.
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `BACKEND_URL` / `VOICE_URL` / `TTS_URL` | `http://127.0.0.1:8000` / `:8100` / `:8201` | 세 서비스 위치. |
+| `PUSH_TOKEN` | (없음) | 백엔드 `PUSH_TOKEN`과 같은 값. `/api/device`에 쓴다. |
+| `AUDIO_INPUT_DEVICE` / `AUDIO_OUTPUT_DEVICE` | (기본 장치) | PortAudio 장치 번호 또는 이름 일부. |
+| `AUDIO_OUTPUT_RATE` / `AUDIO_OUTPUT_CHANNELS` | `16000` / `2` | ReSpeaker Lite USB 펌웨어는 16k 2ch 고정. |
+| `AUDIO_PLAYBACK_GAIN_DB` | `-12` | day-9 실측: 사용자가 "충분"하다고 한 음량이고, 마이크 포화(0dB에서 피크 -0.5 dBFS)를 벗어난다. |
+| `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` / `WAKE_WORD_THRESHOLD_WHILE_SPEAKING` | `hey_jarvis,alexa,hey_mycroft` / `0.5` / `0.2` | **자리표시자**(쉼표로 여러 개, 아무거나 하나면 깨어남). 한국어 "누구야"는 기성 모델이 없다(day-9.md "열린 결정"). 한국어 화자의 "hey jarvis"는 점수가 0.0~0.65로 들쭉날쭉해서(day-9 실기) 발음하기 쉬운 "alexa"를 같이 올렸다. `app/wake_word.py`의 인터페이스 하나로 교체. |
+| `VAD_THRESHOLD` | `0.5` | silero(openWakeWord 동봉). |
+| `STT_LANGUAGE` | `ko` | |
+| `ENDPOINT_TRAILING_SILENCE_MS` / `NO_SPEECH_TIMEOUT_MS` / `MAX_UTTERANCE_MS` / `MIN_SPEECH_MS` | `700` / `5000` / `15000` / `300` | 발화 끝 판정. `app/endpointer.py`. |
+| `AUDIO_WAKE_CHIME` | `true` | 웨이크워드 직후 알림음(무음 150ms + 880Hz 200ms, -12dB). 화면을 안 봐도 "듣고 있어요"를 알 수 있게. 앞의 무음은 USB DAC가 스트림 시작 직후 ~100ms를 삼키기 때문. |
+| `AUDIO_DIAGNOSTICS_SECONDS` | `5` | 이 주기로 마이크 피크 레벨·최고 웨이크 점수·드롭 프레임을 로그. 마이크가 죽은 건지 감지기가 못 듣는 건지 구분용. `0`이면 끔. |
+| `AUDIO_DUMP_DIR` | (없음) | 지정하면 녹음한 발화를 WAV로 남긴다(엔드포인트·STT 튜닝용). `rpi-up.sh`는 `~/claw-recordings`. |
+
+**"최신 의도가 이긴다"**는 브라우저와 똑같이 지킨다. 웨이크워드가 들리면 재생을 멈추고 큐를 비우고
+활성 턴을 취소한다(barge-in). 채택한 턴이 아닌 `utterance`는 버린다. 자기 턴은 POST 전에 채택한다.
+
+재생 sink(`app/player.py`의 `playback_sink`)가 **스피커 교체 지점**이다. 지금은 PortAudio →
+ReSpeaker. 클로바 같은 외부 기기로 가면 그 구현 하나를 더한다. AEC는 하드웨어(ReSpeaker Lite
+USB 펌웨어)가 실측상 못 하므로(day-9.md) 지금은 없다 — 재생 중 들어오는 자기 소리는 -12dB 덕에
+STT에 문장으로는 안 걸리지만, 재생 중 웨이크워드 인식은 best-effort다.
+
 ## 이벤트 계약 (day-7)
 
 프론트는 `GET /api/events`(SSE) 하나를 계속 열어두고, 트리거는 본문에 답이 없는 POST다. 모든 새 경로가 `/api` 아래인 건 의도적이다 — 그 프리픽스는 이미 프록시되므로 `vite.config.ts`와 **먼저 로드되는 `vite.config.js`**를 손으로 맞출 필요가 없다.
@@ -309,6 +362,7 @@ day-7부터 한 턴이 문장 여러 개로 나뉘어 도착하므로, 발화 �
         ──POST /api/turns {text, turn_id} ──► 202 {turn_id}. 본문에 답이 없다.
         ──POST /api/turns/{id}/cancel ──────► 202 {cancelled}. barge-in.
 에이전트 ──POST /api/push (X-Push-Token) ──► 기기가 말한다. 대기 요청 없음.
+오디오루프 ──POST /api/device (X-Push-Token) ─► 202 {seq}. device_* 이벤트를 그대로 재방송 (day-9).
 ```
 
 ### 서버 → 클라이언트 이벤트
@@ -329,6 +383,9 @@ data: {"kind":"utterance","turn_id":"t_7","seq":2,"text":"결론은 이렇습니
 | `turn_cancelling` | `turn_id` | 프로세스가 죽기 전에 즉시 발행 → 클라이언트가 *지금* 오디오를 멈춘다. |
 | `turn_ended` | `turn_id`, `reason` | `completed`/`cancelled`/`failed`. |
 | `error` | `turn_id`, `message` | 턴을 끝내지 않는다. 항상 뒤에 `turn_ended{failed}`가 온다. |
+| `device_state` | `phase` | day-9. 오디오 루프의 상태: `idle`/`listening`/`recording`/`transcribing`/`speaking`. 뷰어의 표정·라벨. |
+| `speech_started` | `turn_id`, `seq`, `started_at`, `track` | day-9. 루프가 그 `utterance`를 재생하기 시작했다. `track`은 `/tts/speak`의 `duration`·`visemes`·`segments`·`envelope`·`envelope_hz` 그대로 → 뷰어가 입을 그린다. |
+| `speech_ended` | `turn_id`, `seq` | day-9. 재생이 끝났다(중단 포함). |
 
 `utterance` vs `notice`가 이 스키마의 핵심선이다. "조사해 보겠습니다"는 에이전트가 실제로 한 말이므로 `utterance`(말한다). 회색 상태줄 "WebSearch"는 `notice`(말하지 않는다). 클라이언트 오디오 파이프라인이 정확히 이 분기를 탄다.
 
