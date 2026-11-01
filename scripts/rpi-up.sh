@@ -12,7 +12,8 @@
 #     input tiny hallucinates and then pays a 40-50s temperature-fallback tail; base beam 1 is
 #     accurate with no tail at RTF 0.65-0.74). WHISPER_MODEL=<local dir> / WHISPER_BEAM_SIZE override.
 #   - tts runs natively (no Docker on this RPi) with the env values from tts/docker-compose.yml `piper`.
-#   - CLAUDE_WORKDIR is an empty dir outside the repo: --allowedTools is not a sandbox (README warning).
+#   - agent-gateway runs the day-10 SDK brain with its home in ~/claw-home (AGENT_BRAIN=cli brings back
+#     the per-turn claude -p). The home's .claude/settings.json is the tool policy now.
 #   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
 #   - kiosk: Chromium on labwc/Wayland (day-9.md "키오스크 1단계" for why each flag is there).
 #     --force-prefers-reduced-motion: the face's CSS breathe/ring animations cost 44% CPU at idle on
@@ -29,7 +30,9 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 gateway_port="${GATEWAY_PORT:-3001}"
 push_token="${PUSH_TOKEN:-day8-push}"
-claude_workdir="${CLAUDE_WORKDIR:-$HOME/claw-home}"
+# day-10: the brain's home (brain-home.example copied here, trusted once with `claude`).
+brain_home="${BRAIN_HOME:-$HOME/claw-home}"
+agent_brain="${AGENT_BRAIN:-sdk}"
 whisper_model="${WHISPER_MODEL:-base}"
 whisper_beam_size="${WHISPER_BEAM_SIZE:-1}"
 kiosk_profile="$HOME/.config/claw-kiosk"
@@ -81,7 +84,8 @@ if tmux has-session -t "$session" 2>/dev/null; then
   exec tmux attach -t "$session"
 fi
 
-mkdir -p "$claude_workdir" "$audio_dump_dir"
+mkdir -p "$audio_dump_dir"
+[ -f "$brain_home/CLAUDE.md" ] || { echo "missing brain home: copy brain-home.example to $brain_home and run claude there once (brain-home.example/README.md)"; exit 1; }
 [ -f "$repo/tts/voices/ko_KR-kss-medium-aligned.onnx" ] || { echo "missing patched piper voice: run the tts setup in HANDOFF.md §설치 순서 2"; exit 1; }
 [ -f "$whisper_model/model.bin" ] || [ "$whisper_model" = "${whisper_model#/}" ] || { echo "missing whisper model dir: $whisper_model (day-8.md \"whisper tiny 비교\" — curl -C - model.bin)"; exit 1; }
 
@@ -104,7 +108,7 @@ tmux send-keys -t "$session:voice" \
 
 tmux new-window -t "$session" -n gateway -c "$repo/agent-gateway"
 tmux send-keys -t "$session:gateway" \
-  "AGENT_PAIRING_CODE=000000 CLAUDE_WORKDIR=$claude_workdir \
+  "AGENT_PAIRING_CODE=000000 AGENT_BRAIN=$agent_brain BRAIN_HOME=$brain_home \
 DEVICE_PUSH_URL=http://127.0.0.1:8000/api/push DEVICE_PUSH_TOKEN=$push_token \
 uv run uvicorn app.server:app --host 127.0.0.1 --port $gateway_port" C-m
 
@@ -131,5 +135,5 @@ tmux new-window -t "$session" -n shell -c "$repo"
 tmux send-keys -t "$session:shell" "sleep 8; $repo/scripts/rpi-up.sh health; hostname -I" C-m
 
 echo "started tmux session '$session' (windows: tts voice gateway backend frontend audio kiosk shell)"
-echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   CLAUDE_WORKDIR=$claude_workdir   whisper=$whisper_model beam=$whisper_beam_size"
+echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   brain=$agent_brain home=$brain_home   whisper=$whisper_model beam=$whisper_beam_size"
 echo "attach: tmux attach -t $session     phone: https://$(hostname -I | awk '{print $1}'):5173"
