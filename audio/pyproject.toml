@@ -1,0 +1,21 @@
+[project]
+name = "my-talking-claw-audio"
+version = "0.1.0"
+description = "The device's resident audio loop: owns the microphone and the speaker, viewers only draw."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26,<2",
+    "sounddevice>=0.5.0",
+    "openwakeword>=0.6.0",
+    "onnxruntime>=1.17",
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
