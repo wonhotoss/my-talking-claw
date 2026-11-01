@@ -352,7 +352,7 @@ Chromium 키오스크 ── #/face?role=viewer ──► 말하지 않고, 듣�
 | pipewire | 0% | |
 
 - 웨이크워드 추론 비용 자체는 onnx 17.7 → tflite **14.1ms/프레임**(-20%). 루프 100%의 원인은 아니다(그건 30%여야 한다). 단독 측정: 3모델 predict를 80ms 간격으로 돌리면 프로세스 CPU **26%**.
-- **루프 100%의 정체 — 죽은 ALSA 핸들 위의 스핀.** `strace -p <busy tid>`: `ioctl(SNDRV_PCM_IOCTL_STATUS_EXT) = ENODEV`, `ppoll → POLLERR` 초당 1만 6천 회. 커널 로그: **14:26:53 ReSpeaker USB 끊김, 14:26:56 재열거**(device 5→6). 루프의 캡처 fd는 `/dev/snd/pcmC3D0c (deleted)`. PortAudio 스레드는 죽은 스트림을 폴링하며 한 코어를 태우고, 주 스레드는 `queue.get()`에서 영원히 대기 — **14:26:53부터 루프는 귀가 먹은 채 조용히 떠 있었다.** 끊긴 이유는 미확인(사용자가 케이블을 건드렸는지, 전원 글리치인지).
+- **루프 100%의 정체 — 죽은 ALSA 핸들 위의 스핀.** `strace -p <busy tid>`: `ioctl(SNDRV_PCM_IOCTL_STATUS_EXT) = ENODEV`, `ppoll → POLLERR` 초당 1만 6천 회. 커널 로그: **14:26:53 ReSpeaker USB 끊김, 14:26:56 재열거**(device 5→6). 루프의 캡처 fd는 `/dev/snd/pcmC3D0c (deleted)`. PortAudio 스레드는 죽은 스트림을 폴링하며 한 코어를 태우고, 주 스레드는 `queue.get()`에서 영원히 대기 — **14:26:53부터 루프는 귀가 먹은 채 조용히 떠 있었다.** 끊긴 이유(사용자): **화면을 닦느라 본체를 조금 움직였다.** 즉 USB-C 접촉이 흔들림에 끊길 만큼 헐겁다 — 케이블 고정·접촉 점검 대상. 전원 문제는 아님. 워치독이 있으니 재발해도 2~3초 뒤 복구된다.
   → `capture.py`에 **워치독**: 2초 동안 프레임이 없으면 스트림을 닫고 PortAudio를 재초기화(`sd._terminate/_initialize`, 재열거된 장치를 다시 찾기 위해)한 뒤 다시 연다. 실패하면 2초마다 재시도. `faulthandler` SIGUSR1 덤프도 추가.
   → 이 발견 전의 "루프 40%"(13:xx 측정)가 정상 기준선에 가깝다. 100%는 고장 모드였다.
 - Chromium 쪽은 **끝났다**: `rpi-up.sh` 기본값에 `--force-prefers-reduced-motion`. 유휴 44%→7%, 얼굴은 그대로 그려진다(스크린샷). 숨쉬기 애니메이션이 필요하면 rAF 루프 안에서 싸게 다시 구현(미룸).
