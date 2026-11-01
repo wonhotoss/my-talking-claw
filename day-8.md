@@ -140,6 +140,6 @@ voice를 `WHISPER_MODEL=voice/models/faster-whisper-tiny`(beam 5)로 재시작�
 - **systemd 유닛** — 현재 `scripts/rpi-up.sh`(tmux). 왜 안 했나: day 9의 오디오 소유자 결정에 따라 프로세스 구성이 바뀐다. 착수 지점: 스크립트의 env 블록을 그대로 `deploy/*.service`로.
 - **`speech_queue.ts`의 전제 주석 갱신** — "Piper ~450ms, 발화는 몇 초 간격"은 RPi에서 둘 다 틀렸다. 서버 직렬화로 동작은 맞지만 주석이 반대로 말한다. 왜 안 했나: 프론트는 이번 수정 범위 밖. 착수 지점: `push()`의 주석.
 - **`beam_size` env 노출** — 현재 faster-whisper 기본값(5). 측정됨: `beam_size=1`이 25% 빠르고 이 입력에선 정확도 차이 없음(둘 다 같은 오인식). 왜 안 했나: 25%로는 실시간에 못 미치고, 모델 교체(`tiny`)와 같이 결정할 일. 착수 지점: `voice/app/stt.py:51`.
-- **방열** — 팬·히트싱크 없음. STT마다 80°C. 왜 안 했나: 하드웨어. 착수 지점: 히트싱크 붙인 뒤 같은 `stt.sh` 3회로 온도 곡선 재측정.
+- **방열** — 팬·히트싱크 없음. STT마다 80°C. 왜 안 했나: 하드웨어. 착수 지점: [hardware-notes.md](hardware-notes.md) "쿨링" 절(2026-10-29 조사). 지금 케이스 후드에 팬 컷아웃이 있어 30mm 팬 + CPU 방열판부터. 붙인 뒤 같은 `stt.sh` 3회로 온도 곡선 재측정.
 - **whisper `tiny` 채택 여부** — 측정됨(위 "whisper tiny 비교"): 속도는 2배라 `tiny + beam 1`만 투영에 닿지만 TTS 입력에서 단어를 통째로 바꾸는 오류가 보인다. 왜 안 했나: 사람 발화 정확도가 없으면 결정 불가. 착수 지점: 폰 녹음 3개를 `voice/models/`의 tiny와 base에 같이 넣어 비교 → `WHISPER_MODEL`은 이미 env라 디렉터리 경로를 주면 그대로 전환된다.
 - **유선 네트워크** — 하드웨어. 모델 다운로드와 `claude -p` 왕복 모두에 걸린다.
