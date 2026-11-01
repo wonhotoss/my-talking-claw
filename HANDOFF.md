@@ -1,6 +1,6 @@
 # HANDOFF — my-talking-claw
 
-이 세션에서 이어서 작업하기 위한 인수인계. 마지막 갱신 2026-11-01 (day 9 진행 중).
+이 세션에서 이어서 작업하기 위한 인수인계. 마지막 갱신 2026-11-01 저녁 (day 9 실기 끝, day 10 데스크탑 구현 끝).
 다음 세션은 **데스크탑 Claude Code가 RPi에 SSH**로 작업한다(`hahahoho@172.30.1.40`, 키 등록됨, 저장소 `~/Documents/my-talking-claw`).
 
 ## 한 줄
@@ -19,13 +19,22 @@
 ### 턴 한 번의 실측 (14:10, 80°C, 툴 없는 질문)
 말 끝 → 엔드포인트 0.7s → STT 5.9s → 포스트 → 첫 소리 13.5s(= `claude -p` 스폰 **6.5s** + 에이전트 2.7s + 첫 문장 TTS 2.8s) → 6문장 24초 재생. **말 끝에서 첫 소리까지 ~20s.** 분해와 줄일 곳은 day-9.md "여섯 번째".
 
+## day 10 상태 (2026-11-01 저녁, 데스크탑에서 구현·실기 완료, RPi 미전환)
+- **설계**: [brain-memo.txt](brain-memo.txt)(사용자) → [day-10.md](day-10.md). 두뇌 계층 = **뇌의 집**(Claude Code 프로젝트 디렉터리, 관리자 설정: CLAUDE.md·settings.json·memory.md·schedule/) + 코드는 호스트와 호출 규약만. 단단한 층(권한·모델·스케줄 검증, 호스트 집행)과 무른 층(문서, 모델이 따르는 만큼).
+- **구현**: `agent-gateway/app/sdk_agent.py`(Agent SDK 상주 세션, resume, 시각 스탬프, interrupt), `scheduler.py`(`schedule/*.json` → `/api/push`), `AGENT_BRAIN=sdk|cli`(기본 `cli`), 템플릿 `brain-home.example/`. 테스트 31개.
+- **데스크탑 실기 통과**: "2분 후에 불러줘" → 파일 → 정각에 push, "기억해" → memory.md, 재시작 뒤 resume, 끼어들기 interrupt 뒤 세션 유지. 스폰 0, 첫 줄까지 1.7~3.5s.
+- **쿨러 주문됨**(30mm SZH-AT002 ×2 + 구리 방열판). 도착 전엔 RPi를 끄고 데스크탑+폰으로 진행(모니터 번인 우려 — 대책은 나중에).
+- 데스크탑 두뇌의 집: `D:\projects\claw-home`(신뢰 수락됨). 기동: `agent-gateway`에서 `AGENT_BRAIN=sdk BRAIN_HOME=D:\projects\claw-home AGENT_PAIRING_CODE=000000 DEVICE_PUSH_URL=http://127.0.0.1:8000/api/push DEVICE_PUSH_TOKEN=<백엔드 PUSH_TOKEN> uv run uvicorn app.server:app --port 3000`. **`CLAUDE_BIN`은 비운다**(npm 스텁 함정, README).
+
 ## 다음 할 일 (우선순위)
-1. **쿨링** — 팬 + 방열판(hardware-notes). 달고 나서 day-9의 턴 측정을 다시 한다. 그 전의 속도 수치는 전부 스로틀 상태 값이다.
-2. **day 10: 두뇌 계층.** `claude -p` 스폰이 턴 지연의 절반이다 → 상주 세션(Agent SDK)이 첫 후보. 기억·시간·도구 정책·발화 규율·계약 재검토는 아래 "Day 10 개요".
-3. **한국어 웨이크워드 "누구야"** — (A) Porcupine: 계정+AccessKey, 콘솔에서 몇 분, 바이너리 비공개. (B) openWakeWord 커스텀: Piper ko로 합성 데이터, GPU 1~2h. `audio/app/wake_word.py` 인터페이스 하나 교체.
-4. **Chromium 유휴 CPU** — 얼굴 rAF 루프가 2×17%. `face_view.tsx` `idle_frame_interval_ms` 또는 유휴 시 정지. STT에 2.3s를 더한다(day-9 측정).
-5. **STT "측정"→"제조/특정"** 오인식 2회 — `~/claw-recordings/`에 녹음이 있다. beam 5로 재전사해 비교.
-6. **소프트웨어 AEC** — AEC를 다시 볼 때. webrtc-audio-processing 등, `capture.py`에 reference 주입.
+1. **데스크탑 전체 스택 + 폰으로 day-10 두뇌를 실사용** — backend·voice·tts·frontend를 데스크탑에서 띄우고(README "Milestone 1 실행") 게이트웨이만 `sdk`로. 발화 규율(첫 문장 짧게, 숫자 읽기)이 TTS에서 어떻게 들리는지.
+2. **쿨링** — 팬 도착 → 장착 → day-9 측정 반복(hardware-notes 2단계 ②: 팬 소음 녹음·"알렉사" 점수).
+3. **RPi에 day-10 두뇌 전환** — 성능 검토(node 상주 RSS·유휴 CPU) 뒤. day-10.md "미룬 개선".
+4. **문장 단위 선출력**(`include_partial_messages`) — 첫 소리 지연의 다음 레버.
+5. **한국어 웨이크워드 "누구야"** — (A) Porcupine: 계정+AccessKey, 콘솔에서 몇 분, 바이너리 비공개. (B) openWakeWord 커스텀: Piper ko로 합성 데이터, GPU 1~2h. `audio/app/wake_word.py` 인터페이스 하나 교체.
+6. ~~Chromium 유휴 CPU~~ — `--force-prefers-reduced-motion`으로 44%→7~16% (day-9 쿨링 절). `face_view.tsx` `idle_frame_interval_ms` 또는 유휴 시 정지. STT에 2.3s를 더한다(day-9 측정).
+7. **STT "측정"→"제조/특정"** 오인식 2회 — `~/claw-recordings/`에 녹음이 있다. beam 5로 재전사해 비교.
+8. **소프트웨어 AEC** — AEC를 다시 볼 때. webrtc-audio-processing 등, `capture.py`에 reference 주입.
 
 ## Day 10 개요 — LLM 레이어 (*claw 대체)
 

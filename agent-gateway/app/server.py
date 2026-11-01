@@ -1,14 +1,19 @@
+import asyncio
+import contextlib
 import dataclasses
 import json
 import os
 import secrets
 from collections.abc import AsyncIterator
+from pathlib import Path
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.claude_agent import agent_line, claude_agent
+from app.scheduler import scheduler
 
 
 # Proposed extension to nullclaw's webhook contract: a client that sends
@@ -38,19 +43,62 @@ class health_response(BaseModel):
     model: str
 
 
+# Which brain hosts the session. "cli" spawns `claude -p` per turn (day-7);
+# "sdk" keeps one Agent SDK session resident in a BRAIN_HOME (day-10).
+brain_kind = os.environ.get("AGENT_BRAIN", "cli")
+
+# How often the brain's schedule/ directory is checked, in seconds.
+schedule_poll_seconds = float(os.environ.get("SCHEDULE_POLL_SECONDS", "5"))
+
+
+def make_agent():
+    if brain_kind == "sdk":
+        from app.sdk_agent import sdk_agent
+
+        return sdk_agent()
+
+    if brain_kind == "cli":
+        return claude_agent()
+
+    raise ValueError(f"AGENT_BRAIN must be sdk or cli, got {brain_kind!r}")
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    # The scheduler only makes sense with a home to read and a device to push to.
+    push_url = os.environ.get("DEVICE_PUSH_URL", "")
+    push_token = os.environ.get("DEVICE_PUSH_TOKEN", "")
+
+    if brain_kind == "sdk" and push_url != "" and push_token != "":
+        async with httpx.AsyncClient() as http:
+            task = asyncio.create_task(
+                scheduler(Path(os.environ["BRAIN_HOME"]), push_url, push_token, http).run(
+                    schedule_poll_seconds
+                )
+            )
+
+            try:
+                yield
+            finally:
+                task.cancel()
+    else:
+        yield
+
+
 app = FastAPI(
     title="My Talking Claw Agent Gateway",
-    version="0.2.0",
+    version="0.3.0",
+    lifespan=lifespan,
 )
 
-agent = claude_agent()
+agent = make_agent()
 issued_tokens: set[str] = set()
 pairing_code = os.environ.get("AGENT_PAIRING_CODE", "000000")
 
 
 @app.get("/health", response_model=health_response)
 def get_health() -> health_response:
-    return health_response(status="ok", model=agent.model)
+    return health_response(status="ok", model=agent.model or "settings.json")
 
 
 @app.post("/pair", response_model=pair_response)

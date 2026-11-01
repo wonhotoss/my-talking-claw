@@ -1,0 +1,22 @@
+{
+  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "Read",
+      "Edit(memory.md)",
+      "Edit(schedule/*)"
+    ],
+    "deny": [
+      "Bash",
+      "Task",
+      "NotebookEdit",
+      "KillShell",
+      "BashOutput"
+    ]
+  },
+  "includeGitInstructions": false,
+  "attribution": { "commit": "", "pr": "" }
+}

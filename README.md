@@ -70,6 +70,11 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 3000
 | `CLAUDE_WORKDIR` | (cwd) | claude 실행 디렉터리. |
 | `DEVICE_PUSH_URL` | (없음) | 백엔드의 `/api/push`. 아래 `DEVICE_PUSH_TOKEN`과 **둘 다** 있어야 시스템 프롬프트에 아웃바운드 채널이 실린다. |
 | `DEVICE_PUSH_TOKEN` | (없음) | 백엔드 `PUSH_TOKEN`과 같은 값. |
+| `AGENT_BRAIN` | `cli` | day-10. `sdk`면 Claude Agent SDK **상주 세션**이 두뇌(스폰 0, 재시작 시 resume, 끼어들기 interrupt, `schedule/` 스케줄러). `cli`면 지금까지의 턴당 `claude -p`. |
+| `BRAIN_HOME` | (없음, `sdk`면 필수) | 두뇌의 집 — Claude Code 프로젝트 디렉터리. 템플릿 [brain-home.example/](brain-home.example/). CLAUDE.md가 없거나 **신뢰 수락이 안 된 폴더면 기동을 거부**한다. `CLAUDE_MODEL`·`CLAUDE_SYSTEM_PROMPT`·`CLAUDE_ALLOWED_TOOLS`·`CLAUDE_WORKDIR`는 `sdk`에선 쓰지 않는다 — 전부 집의 `.claude/settings.json`·`system-prompt.md`가 담당. |
+| `SCHEDULE_POLL_SECONDS` | `5` | `sdk`일 때 `BRAIN_HOME/schedule/`을 훑는 주기. `DEVICE_PUSH_URL`·`DEVICE_PUSH_TOKEN`이 둘 다 있어야 스케줄러가 뜬다. |
+
+> **day-10.** 두뇌 계층의 설계(집 디렉터리 = 관리자 설정, 코드 = 호스트 + 호출 규약, 단단한 층/무른 층)는 [day-10.md](day-10.md)와 [brain-home.example/README.md](brain-home.example/README.md)에 있다. `AGENT_BRAIN=sdk`에서 `CLAUDE_BIN`은 비워 두는 것이 안전하다 — 이 데스크탑의 npm `claude.exe`는 2026-11-01에 텍스트 스텁으로 바뀌어 있었고, SDK는 비워 두면 CLI를 스스로 찾는다.
 
 > **경고 (day-7 실측, CLI 2.1.220).** `--allowedTools`는 **권한을 제한하지 않는다.** 자동 승인 목록일 뿐이다. `CLAUDE_ALLOWED_TOOLS`를 비운 상태로 `claude -p`를 돌려도 `system/init`은 툴 33개를 전부 available로 보고하고, `Read`가 permission denial 0건으로 실제 실행된다. 즉 **지금 이 게이트웨이의 에이전트는 이미 Read/Write/Edit/Bash를 쓸 수 있다.** "비우면 대화형(무툴)"이라는 이전 설명은 틀렸다. 실제로 막으려면 `--disallowedTools`가 필요하다.
 
