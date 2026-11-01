@@ -341,6 +341,24 @@ Chromium 키오스크 ── #/face?role=viewer ──► 말하지 않고, 듣�
 - 루프의 1.8s는 **실제 턴에선 안 든다** — 턴의 STT 동안 루프는 `transcribe()`에 막혀 웨이크워드를 안 돌린다(위 측정은 curl이라 루프가 감지 중이었다). 단, 바로 그 이유로 STT 중엔 웨이크워드도 안 듣는다.
 - 열은 다시 하드웨어 항목. 83°C에서 클럭이 떨어지기 시작한다.
 
+### 유휴 부하 분해 — 소프트웨어로 얼마나 내려가나 (2026-11-01 14:20~, 사용자 결정: 소프트웨어 테스트 + 팬 병행)
+
+| 성분 | 유휴 CPU | 근거 |
+| --- | --- | --- |
+| Chromium, 얼굴 뷰어 | **39~44%** | `about:blank`이면 **0%** → 전부 얼굴 페이지 |
+| Chromium, 얼굴 + `--force-prefers-reduced-motion` | **7%** | 코드 0줄. `styles.css`의 `face_breathe`(4.2s)·`face_ring_pulse` CSS 애니메이션이 GPU 합성 없는 이 Pi에선 60fps 리페인트 = 37%. reduced-motion 미디어쿼리가 이미 `animation: none`을 하고 있었다 |
+| 오디오 루프 python | **100%**(한 코어) | 스레드 12개 중 **주 스레드가 아닌 하나**가 100%. 주 스레드(웨이크워드 추론)는 5초 샘플에서 0틱. 용의자: onnxruntime 스레드풀 스핀 대기, PortAudio 콜백, SSE 스레드. py-spy는 sudo 필요(ptrace) — `faulthandler` SIGUSR1 덤프를 main.py에 넣어 다음 재시작부터 확인 |
+| labwc | 4~7% | |
+| pipewire | 0% | |
+
+- 웨이크워드 추론 비용 자체는 onnx 17.7 → tflite **14.1ms/프레임**(-20%). 루프 100%의 원인은 아니다(그건 30%여야 한다). 단독 측정: 3모델 predict를 80ms 간격으로 돌리면 프로세스 CPU **26%**.
+- **루프 100%의 정체 — 죽은 ALSA 핸들 위의 스핀.** `strace -p <busy tid>`: `ioctl(SNDRV_PCM_IOCTL_STATUS_EXT) = ENODEV`, `ppoll → POLLERR` 초당 1만 6천 회. 커널 로그: **14:26:53 ReSpeaker USB 끊김, 14:26:56 재열거**(device 5→6). 루프의 캡처 fd는 `/dev/snd/pcmC3D0c (deleted)`. PortAudio 스레드는 죽은 스트림을 폴링하며 한 코어를 태우고, 주 스레드는 `queue.get()`에서 영원히 대기 — **14:26:53부터 루프는 귀가 먹은 채 조용히 떠 있었다.** 끊긴 이유는 미확인(사용자가 케이블을 건드렸는지, 전원 글리치인지).
+  → `capture.py`에 **워치독**: 2초 동안 프레임이 없으면 스트림을 닫고 PortAudio를 재초기화(`sd._terminate/_initialize`, 재열거된 장치를 다시 찾기 위해)한 뒤 다시 연다. 실패하면 2초마다 재시도. `faulthandler` SIGUSR1 덤프도 추가.
+  → 이 발견 전의 "루프 40%"(13:xx 측정)가 정상 기준선에 가깝다. 100%는 고장 모드였다.
+- Chromium 쪽은 **끝났다**: `rpi-up.sh` 기본값에 `--force-prefers-reduced-motion`. 유휴 44%→7%, 얼굴은 그대로 그려진다(스크린샷). 숨쉬기 애니메이션이 필요하면 rAF 루프 안에서 싸게 다시 구현(미룸).
+
+**감량 뒤 유휴 온도 (14:36~14:44, 재기동 직후부터 9분, 1분 간격).** 75.4 → 73.5 → 74.0 → 74.0 → 73.5 → 74.0 → 72.5 → 73.5 → **72.5°C**, load 0.5~0.9, 클럭 1800MHz 유지(한 샘플만 1100 = ondemand 유휴). 감량 전 유휴 76~80°C(load ~1.4). **소프트웨어로 얻은 건 4~5°C.** 유휴 72~74°C는 여전히 STT 버스트 한 번이면 80°C를 넘는 높이다 — 케이스 안 열 포화가 바닥을 정한다. 결론: 사용자 판단대로 **팬이 필요하다.** 소프트웨어 감량은 그 위에 얹는 보너스.
+
 ## 펌웨어 조사 (포럼 "Respeaker Lite AEC support", GitHub respeaker/ReSpeaker_Lite)
 
 | 버전 | 상태 |

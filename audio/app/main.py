@@ -25,7 +25,9 @@ Configuration (all optional; defaults are the single-RPi layout of rpi-up.sh):
   AUDIO_DIAGNOSTICS_SECONDS           5: log mic peak level + peak wake score this often; 0 = off
 """
 
+import faulthandler
 import os
+import signal
 
 import httpx
 
@@ -94,6 +96,9 @@ def main() -> None:
         settings=settings,
     )
 
+    # kill -USR1 <pid> prints every thread's stack to stderr: the cheap way to see
+    # what a hot thread is doing.
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     log(f"ready: wake words {env('WAKE_WORD_MODEL', 'hey_jarvis,alexa,hey_mycroft')}, gain {settings.playback_gain_db}dB")
     loop.run()
 

@@ -15,6 +15,8 @@
 #   - CLAUDE_WORKDIR is an empty dir outside the repo: --allowedTools is not a sandbox (README warning).
 #   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
 #   - kiosk: Chromium on labwc/Wayland (day-9.md "키오스크 1단계" for why each flag is there).
+#     --force-prefers-reduced-motion: the face's CSS breathe/ring animations cost 44% CPU at idle on
+#     this Pi (no GPU compositing); with reduced motion Chromium idles at 7% (day-9 cooling test).
 #     Screen blanking (swayidle from ~/.config/labwc/autostart) is stopped while the stack runs and
 #     restarted on `down`; a reboot restores the default by itself.
 set -euo pipefail
@@ -122,7 +124,7 @@ tmux new-window -t "$session" -n kiosk -c "$HOME"
 tmux send-keys -t "$session:kiosk" \
   "until curl -sk -m 2 -o /dev/null https://127.0.0.1:5173/; do sleep 1; done; \
 LANGUAGE=ko LANG=ko_KR.UTF-8 chromium --kiosk --ozone-platform=wayland --lang=ko --password-store=basic \
---ignore-certificate-errors --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
+--force-prefers-reduced-motion --ignore-certificate-errors --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
 --noerrdialogs --disable-infobars --user-data-dir=$kiosk_profile '$kiosk_url' 2>&1 | grep -v -E '^\\[|GPU|dbus'" C-m
 
 tmux new-window -t "$session" -n shell -c "$repo"
