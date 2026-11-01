@@ -36,14 +36,14 @@ import {
   sample_envelope,
   voiced_progress,
 } from "./speech_track";
-import type { speech_segment, speech_track } from "./speech_track";
+import type { playback_clock, speech_segment, speech_track } from "./speech_track";
 
 export type face_view_props = {
   mood: face_mood;
   // What the system is doing right now, shown in the caption area while the
   // face is not speaking.
   status_label: string;
-  audio_ref: RefObject<HTMLAudioElement | null>;
+  read_playback: playback_clock;
   speech_track_ref: RefObject<speech_track | null>;
   // True while the queue still has something to say. Holds the last caption
   // through the src swap between utterances - the track is null for ~100ms
@@ -185,18 +185,8 @@ export function face_view(props: face_view_props) {
     const step = (now_ms: number) => {
       frame = window.requestAnimationFrame(step);
 
-      const audio = props.audio_ref.current;
       const track = props.speech_track_ref.current;
-      const current_time = audio === null ? 0 : audio.currentTime;
-      // audio.muted is the unlock_audio() guard: the shared element also plays
-      // a silent WAV inside the first tap gesture, and the mouth must not flap
-      // for it. currentTime > 0 skips the instant right after play().
-      const playing =
-        audio !== null &&
-        !audio.paused &&
-        !audio.ended &&
-        !audio.muted &&
-        current_time > 0;
+      const { playing, time: current_time } = props.read_playback();
 
       if (!playing && now_ms - last_ms < idle_frame_interval_ms) {
         return;
@@ -350,7 +340,7 @@ export function face_view(props: face_view_props) {
     // mount, making the flicker look intermittent rather than fixed. Rebuilding
     // is free - it already happens on every mood change, and all interpolation
     // state lives in refs.
-  }, [props.mood, props.speech_pending, props.audio_ref, props.speech_track_ref]);
+  }, [props.mood, props.speech_pending, props.read_playback, props.speech_track_ref]);
 
   return (
     <div className="face_stage_wrap">

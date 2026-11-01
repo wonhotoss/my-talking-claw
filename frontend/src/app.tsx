@@ -1,4 +1,11 @@
-import { createElement, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Mic, Square, Volume2, VolumeX } from "lucide-react";
 
 import { face_view } from "./face_view";
@@ -9,12 +16,18 @@ import {
   subscribe_events,
   subscribe_stream_status,
 } from "./event_stream";
-import type { server_event } from "./event_stream";
+import type { device_phase, server_event } from "./event_stream";
 import { create_speech_queue } from "./speech_queue";
 import type { speech_phase, speech_queue } from "./speech_queue";
-import type { speech_track } from "./speech_track";
+import type { playback_position, speech_track } from "./speech_track";
 
 type layout_kind = "console" | "face";
+
+// Day-9: who owns audio. "speaker" is the phone as before - it records, speaks,
+// and animates from its own <audio>. "viewer" is the RPi kiosk once the
+// resident loop (audio/) owns the ReSpeaker: it neither records nor speaks, it
+// draws what the loop reports. #/face?role=viewer
+type client_role = "speaker" | "viewer";
 
 type timeline_kind = "user" | "agent" | "notice" | "system";
 type timeline_level = "info" | "error";
@@ -151,6 +164,22 @@ function read_hash(): string {
   return window.location.hash;
 }
 
+function read_role(hash: string): client_role {
+  const query = hash.split("?")[1] ?? "";
+
+  return new URLSearchParams(query).get("role") === "viewer" ? "viewer" : "speaker";
+}
+
+// What the loop reported, mapped onto the speaker's own vocabulary so the mood
+// and label functions stay single-sourced.
+function viewer_mic_phase(phase: device_phase): mic_phase {
+  return phase === "recording" ? "recording" : phase === "transcribing" ? "transcribing" : "idle";
+}
+
+function viewer_speech_phase(phase: device_phase): speech_phase {
+  return phase === "speaking" ? "speaking" : "idle";
+}
+
 // Builds a short silent WAV blob URL, played once inside a tap gesture to
 // unlock <audio> playback on iOS (which blocks any play() that is not
 // gesture-initiated — the agent reply plays several awaits after the tap).
@@ -204,8 +233,13 @@ export function app_shell() {
   // at a time: after a barge-in this is null, so every straggling utterance from
   // the abandoned turn is dropped.
   const accepted_turn_ref = useRef<string | null>(null);
+  // Viewer only: the utterance the loop is playing right now, anchored to our
+  // own clock at the moment speech_started arrived. Same machine, so the
+  // anchor is within a few ms of the loop's first sample.
+  const viewer_speech_ref = useRef<{ started_ms: number; duration: number } | null>(null);
 
   const [timeline, set_timeline] = useState<timeline_entry[]>([]);
+  const [device_phase, set_device_phase] = useState<device_phase>("idle");
   const [permission, set_permission] = useState<mic_permission>("pending");
   const [mic_phase, set_mic_phase] = useState<mic_phase>("idle");
   const [speech, set_speech] = useState<speech_phase>("idle");
@@ -286,9 +320,44 @@ export function app_shell() {
     audio_unlocked_ref.current = true;
   };
 
+  const clear_viewer_speech = () => {
+    viewer_speech_ref.current = null;
+    speech_track_ref.current = null;
+  };
+
+  // Read every frame by the face. Both branches read refs only, so the identity
+  // can be stable - it is an effect dependency of the face's animation loop.
+  const read_playback = useCallback((): playback_position => {
+    if (read_role(window.location.hash) === "viewer") {
+      const speech = viewer_speech_ref.current;
+
+      if (speech === null) {
+        return { playing: false, time: 0 };
+      }
+
+      const time = (performance.now() - speech.started_ms) / 1000;
+
+      return { playing: time < speech.duration, time };
+    }
+
+    const audio = audio_ref.current;
+    const time = audio === null ? 0 : audio.currentTime;
+
+    // audio.muted is the unlock_audio() guard: the shared element also plays a
+    // silent WAV inside the first tap gesture, and the mouth must not flap for
+    // it. currentTime > 0 skips the instant right after play().
+    return {
+      playing: audio !== null && !audio.paused && !audio.ended && !audio.muted && time > 0,
+      time,
+    };
+  }, []);
+
   // Invariant that makes the one-shot effect below safe: this handler and the
-  // speech queue read refs and call setters. They never read React state.
+  // speech queue read refs and call setters. They never read React state. The
+  // role is read from the URL, the source of truth, for the same reason.
   const handle_server_event = (event: server_event, queue: speech_queue) => {
+    const viewer = read_role(window.location.hash) === "viewer";
+
     switch (event.kind) {
       case "stream_hello":
         // The server sends this exactly when it could not resume us, so it is
@@ -340,7 +409,12 @@ export function app_shell() {
         }
 
         add_agent(event.text);
-        queue.push(event.text);
+
+        // The loop speaks it; we will hear about it as speech_started.
+        if (!viewer) {
+          queue.push(event.text);
+        }
+
         return;
 
       case "turn_cancelling":
@@ -352,6 +426,30 @@ export function app_shell() {
         // what is queued is no longer wanted.
         finish_turn();
         queue.cancel();
+        clear_viewer_speech();
+        return;
+
+      case "device_state":
+        set_device_phase(event.phase);
+        return;
+
+      case "speech_started":
+        if (!viewer) {
+          return;
+        }
+
+        speech_track_ref.current = event.track;
+        viewer_speech_ref.current = {
+          started_ms: performance.now(),
+          duration: event.track.duration,
+        };
+        return;
+
+      case "speech_ended":
+        if (viewer) {
+          clear_viewer_speech();
+        }
+
         return;
 
       case "turn_ended":
@@ -534,6 +632,12 @@ export function app_shell() {
   }, []);
 
   useEffect(() => {
+    // A viewer never records; asking for the microphone would only make the
+    // loop and Chromium share the ReSpeaker for nothing.
+    if (read_role(window.location.hash) === "viewer") {
+      return;
+    }
+
     // Prompt for mic permission on load, then release the track. Each recording
     // acquires its own fresh stream (permission is remembered — no re-prompt).
     void (async () => {
@@ -552,9 +656,20 @@ export function app_shell() {
 
   const hash = useSyncExternalStore(subscribe_hash, read_hash);
   const stream = useSyncExternalStore(subscribe_stream_status, read_stream_status);
-  const layout: layout_kind = hash === "#/face" ? "face" : "console";
-  const mood = pick_mood(permission, mic_phase, speech, turn_label !== "");
-  const status_label = pick_status_label(permission, mic_phase, speech, turn_label, stream);
+  const layout: layout_kind = hash.startsWith("#/face") ? "face" : "console";
+  const viewer = read_role(hash) === "viewer";
+  // A viewer shows the device's phases, not its own (it has none).
+  const shown_permission: mic_permission = viewer ? "granted" : permission;
+  const shown_mic = viewer ? viewer_mic_phase(device_phase) : mic_phase;
+  const shown_speech = viewer ? viewer_speech_phase(device_phase) : speech;
+  const mood = pick_mood(shown_permission, shown_mic, shown_speech, turn_label !== "");
+  const status_label = pick_status_label(
+    shown_permission,
+    shown_mic,
+    shown_speech,
+    turn_label,
+    stream,
+  );
 
   // The console body is wrapped in a single fragment so that both layouts
   // render exactly two children, [branch, audio]. React reconciles by
@@ -569,10 +684,11 @@ export function app_shell() {
         createElement(face_view, {
           mood,
           status_label,
-          audio_ref,
+          read_playback,
           speech_track_ref,
-          speech_pending: speech !== "idle",
-          on_tap: () => void handle_mic_click(),
+          speech_pending: shown_speech !== "idle",
+          // A viewer's tap does nothing: the loop's wake word is the trigger.
+          on_tap: viewer ? () => undefined : () => void handle_mic_click(),
           on_exit: () => {
             window.location.hash = "";
           },

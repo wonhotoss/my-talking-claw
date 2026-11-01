@@ -12,6 +12,8 @@
 // no new entry is needed in vite.config.ts *and* its committed .js twin, which
 // resolves first and has silently shadowed edits before.
 
+import type { speech_track } from "./speech_track";
+
 export type turn_source = "user" | "agent" | "external";
 export type turn_end_reason = "completed" | "cancelled" | "failed";
 export type notice_kind = "tool_use" | "progress";
@@ -75,6 +77,32 @@ export type error_event = {
   message: string;
 };
 
+// Day-9: the device's audio loop (audio/) owns the microphone and the speaker.
+// It reports through these three so a viewer - the kiosk face at
+// #/face?role=viewer - can draw without owning any audio.
+export type device_phase = "idle" | "listening" | "recording" | "transcribing" | "speaking";
+
+export type device_state_event = {
+  kind: "device_state";
+  phase: device_phase;
+};
+
+// The loop started playing one utterance; `track` is the tts service's timing
+// verbatim, and the viewer anchors it at receipt time (same machine, ms apart).
+export type speech_started_event = {
+  kind: "speech_started";
+  turn_id: string;
+  seq: number;
+  started_at: number;
+  track: speech_track;
+};
+
+export type speech_ended_event = {
+  kind: "speech_ended";
+  turn_id: string;
+  seq: number;
+};
+
 export type server_event =
   | stream_hello_event
   | turn_started_event
@@ -82,7 +110,10 @@ export type server_event =
   | notice_event
   | turn_cancelling_event
   | turn_ended_event
-  | error_event;
+  | error_event
+  | device_state_event
+  | speech_started_event
+  | speech_ended_event;
 
 export type stream_status = "connecting" | "open" | "closed";
 
@@ -116,6 +147,9 @@ export function parse_server_event(payload: string): server_event {
     case "turn_cancelling":
     case "turn_ended":
     case "error":
+    case "device_state":
+    case "speech_started":
+    case "speech_ended":
       return data as server_event;
     default:
       throw new Error(`알 수 없는 서버 이벤트: ${String(data.kind)}`);

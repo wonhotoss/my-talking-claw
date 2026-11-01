@@ -31,6 +31,16 @@ export type spoken_reply = {
   track: speech_track;
 };
 
+// Where playback is right now, from whoever owns it: the <audio> element on the
+// phone, or a clock started by the loop's speech_started event on the kiosk
+// viewer. The face reads this every frame and never touches audio itself.
+export type playback_position = {
+  playing: boolean;
+  time: number;
+};
+
+export type playback_clock = () => playback_position;
+
 type speak_response = {
   audio_base64: string;
   media_type: string;
