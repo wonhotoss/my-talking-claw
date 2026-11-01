@@ -133,6 +133,15 @@ backend·voice(base beam 1)·tts(Piper, Docker)·frontend를 데스크탑에, �
 - ②의 처리: TTS의 한계가 맞지만(Piper는 "172.30.1.47"을 사람처럼 못 읽는다), 고치는 자리는 **무른 층**이다. CLAUDE.md에 "IP·전화번호·코드는 읽는 대로 적어라('일칠이 점 삼공 점 일 점 사칠'), 꼭 필요하지 않으면 말하지 말라"를 추가. TTS 앞단 정규화(코드)는 미룸.
 - ③의 처리: 가능하지만(`Edit(CLAUDE.md)` 허용 한 줄) 설계상 CLAUDE.md는 관리자 것으로 둔다. 대신 **`memory.md`를 CLAUDE.md에 `@memory.md`로 자동 포함**시켜 매 세션 읽히게 하고, 말투·호칭 같은 사용자 선호도 `memory.md`에 적도록 규약을 바꿨다. 그러면 "앞으로 반말로 해"가 음성으로 되고(두뇌가 memory.md에 적음), 관리자의 CLAUDE.md는 안 건드린다. 이전엔 memory.md가 자동으로 읽히지 않았다(두뇌가 Read로 열어야 했다) — 새 세션에선 잊었을 것. 이번 수정이 그 구멍도 막는다.
 
+### 반영 시점 실측 + 관리자/음성 사용자 경계 (2026-11-01 17:20)
+
+사용자: "CLAUDE.md는 재시작해야 읽히고 memory.md는 매 턴 읽힌다, 맞나?" → **둘 다 세션 시작 때 한 번.** Read 도구를 뺀 상주 세션에서 턴 1 뒤 memory.md에 "좋아하는 색은 보라", CLAUDE.md에 "네 이름은 토리"를 써넣고 턴 2에 물었더니 둘 다 모른다. 두뇌가 스스로 고친 건 도구 호출이 대화에 남아 바로 따른다. 결론: 음성으로 바꾼 건 즉시, 관리자가 손으로 고친 건 게이트웨이 재시작.
+
+사용자 결정: **음성 입출력 사용자의 영역을 좁히지 않는다.** 구현상 문제없는 건 음성에도 연다. 관리자는 초기 세팅과 "무엇을 어디에 두는가" 같은 운영 규칙이면 충분하다. → 집을 둘로 갈랐다:
+- `CLAUDE.md` = 운영 규칙(관리자): 말하는 규칙, 시간, 파일 규약, 하지 않는 것.
+- `persona.md` = 성격·말투·이름·호칭(**두뇌가 음성 요청으로 고친다**, `Edit(persona.md)` 허용). `memory.md`와 함께 `@import`.
+단단한 층은 그대로 관리자 것(`.claude/settings.json`, CLAUDE.md 자체).
+
 ## 미룬 개선 (deferred)
 - **문장 단위 선출력** — 현재: 텍스트 블록 완성 후 한 번에. 측정됨: 긴 답에서 2.2초 동안 0줄. 왜 안 했나: 백엔드 분할기와의 경계를 정해야 한다(델타를 어디서 문장으로 자르나). 착수 지점: `sdk_agent.py` `options()`에 `include_partial_messages=True`, `translate_message`에 `StreamEvent`(`content_block_delta`/`text_delta`) 누적 후 문장 경계에서 `reply`.
 - **RPi 전환** — 현재 `AGENT_BRAIN` 기본 `cli`. 왜 안 했나: 사용자 요청(성능 영향 검토 먼저). 착수 지점: RPi에서 `uv sync`(SDK 휠 aarch64 확인), `~/claw-home`에 템플릿 복사 + `claude` 신뢰 수락, `rpi-up.sh` gateway 창에 `AGENT_BRAIN=sdk BRAIN_HOME=$HOME/claw-home`. 재야 할 것: node 상주 RSS·유휴 CPU, 턴 지연 before/after.

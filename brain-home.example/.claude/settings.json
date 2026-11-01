@@ -6,6 +6,7 @@
       "WebSearch",
       "WebFetch",
       "Read",
+      "Edit(persona.md)",
       "Edit(memory.md)",
       "Edit(schedule/*)"
     ],
@@ -18,5 +19,8 @@
     ]
   },
   "includeGitInstructions": false,
-  "attribution": { "commit": "", "pr": "" }
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
 }
