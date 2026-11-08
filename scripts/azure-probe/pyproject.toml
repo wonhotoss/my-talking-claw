@@ -1,0 +1,18 @@
+[project]
+name = "my-talking-claw-azure-probe"
+version = "0.1.0"
+description = "Measurement probes for moving STT and TTS to Azure Speech: accuracy, streaming latency, viseme mapping."
+requires-python = ">=3.11"
+dependencies = [
+    "azure-cognitiveservices-speech>=1.40.0",
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

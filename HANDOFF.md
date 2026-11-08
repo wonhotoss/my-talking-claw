@@ -31,6 +31,8 @@
 - 데스크탑 두뇌의 집: `D:\projects\claw-home`(신뢰 수락됨). 기동: `agent-gateway`에서 `AGENT_BRAIN=sdk BRAIN_HOME=D:\projects\claw-home AGENT_PAIRING_CODE=000000 DEVICE_PUSH_URL=http://127.0.0.1:8000/api/push DEVICE_PUSH_TOKEN=<백엔드 PUSH_TOKEN> uv run uvicorn app.server:app --port 3000`. **`CLAUDE_BIN`은 비운다**(npm 스텁 함정, README).
 
 > **2026-11-08 방향 논의**: STT·TTS는 Azure Speech 종량제로, 뇌는 RPi에 남기고 뇌에게 기기(예약·외장기기·얼굴 카드)를 준다. 트랙·범위·의존성은 [뇌중심-로드맵.md](뇌중심-로드맵.md). 우선순위는 미정(사용자 재판단).
+>
+> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). 어댑터 설계 결정(루프가 STT를 쥐는 `transcriber` Protocol 심, `stream.close()`→세션 종료 대기, Azure viseme ID를 기호로 보고 `pieces()` 재사용, A-1 생략)은 day-11 "미룬 개선"에.
 
 ## 다음 할 일 (우선순위)
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.
@@ -39,7 +41,7 @@
 4. **모니터 번인 대책** — 스택이 떠 있는 동안 화면이 항상 켜져 있다(swayidle을 끈다). 얼굴이 정적이라 번인 위험. 후보: 대기 중 화면 끄기 + 웨이크워드·발화 때 `wlopm --on`, 또는 얼굴을 몇 분마다 조금씩 움직이기.
 5. **한국어 웨이크워드 "누구야"** — (A) Porcupine: 계정+AccessKey, 콘솔에서 몇 분, 바이너리 비공개. (B) openWakeWord 커스텀: Piper ko로 합성 데이터, GPU 1~2h. `audio/app/wake_word.py` 인터페이스 하나 교체.
 6. ~~Chromium 유휴 CPU~~ — `--force-prefers-reduced-motion`으로 44%→7~16% (day-9 쿨링 절). `face_view.tsx` `idle_frame_interval_ms` 또는 유휴 시 정지. STT에 2.3s를 더한다(day-9 측정).
-7. **STT "측정"→"제조/특정"** 오인식 2회 — `~/claw-recordings/`에 녹음이 있다. beam 5로 재전사해 비교.
+7. ~~STT "측정"→"제조/특정" 오인식~~ — Azure가 1건 교정, 1건은 Azure도 "제조"(day-11 프로브). 11-01 녹음은 마이크 포화(−0 dBFS)였다. 트랙 A로 흡수.
 8. **소프트웨어 AEC** — AEC를 다시 볼 때. webrtc-audio-processing 등, `capture.py`에 reference 주입.
 
 ## Day 10 개요 — LLM 레이어 (*claw 대체)

@@ -63,7 +63,71 @@ STT 처리 시간: 15.6s(콜드) / **9.8 / 9.8 / 9.7s** → RTF **0.82**. day-8�
 
 부수: 스택 기동 직후 `[scheduler] 1724-call.json: fired (say)` — 11-01 테스트의 "2분 후에 불러줘" 항목이 `schedule/`에 남아 있다가 일주일 뒤 기동 때 발화했다.
 
+## Azure 음성 API 프로브 (21:28~21:46) — 트랙 A·B 실측
+
+[뇌중심-로드맵.md](뇌중심-로드맵.md)의 "실측으로 확인할 것"을 어댑터 코드보다 먼저 쟀다. 도구: [scripts/azure-probe/](scripts/azure-probe/README.md)(독립 uv 프로젝트, Speech SDK 1.53.0 — **aarch64 RPi에 추가 패키지 없이 설치·임포트됨**). 리소스: Speech F0, `koreacentral`(RPi에서 RTT 6~37 ms). 키는 `scripts/azure-probe/.env`(gitignore).
+
+### STT 정확도 — `~/claw-recordings` 16개, `recognize_once`
+15/16 인식(1개 NoMatch: 1.2초 클립). "라즈베리파이에 대해서 설명해줘" 정확(whisper base는 "라즈베리 파이의 대에서"). HANDOFF 7번 "측정→제조" 2건 중 **1건 교정**("지금 기기 온도 측정 부탁해"), 1건은 Azure도 "지금 온도 좀 제조"(녹음 자체가 그렇게 들릴 가능성). 부수 발견: **11-01 녹음 11개는 피크 −0~−2 dBFS로 마이크 포화** 상태였다(11-08 것은 −6~−13). 두 엔진 모두에 불리한 입력이었다.
+
+### STT 스트리밍 — A-2의 숫자 (RPi, Wi-Fi가 멀쩡하던 구간)
+2.5초·4.1초 실녹음을 80 ms 프레임으로 실시간 push, 끝나면 `stream.close()`.
+
+| 모드 | 말 끝 → 최종 텍스트 (`tail`) | 세션 종료 | 첫 partial |
+| --- | --- | --- | --- |
+| 실시간 (6회) | **−0.12 ~ +0.24 s** | +0.10 ~ 0.26 s | 발화 시작 1.3~2.8 s 뒤, 이후 오디오를 ~0.3 s 뒤따름 |
+| burst(통째) 2.5 s 클립 | 1.4~2.9 s | | — 서비스 처리 속도는 실시간의 1~2배. **이득은 녹음 중 스트리밍에서만** 난다 |
+
+지금 STT 6.8 s(whisper 30초 창) → **사실상 0**. 로드맵 기대치(0.3~0.7)보다 좋다. `start_continuous_recognition`은 0.0 s에 돌아온다(연결은 첫 프레임과 겹쳐 열림) — pre-connect 이득은 이번 측정에선 식별 불가(아래 Wi-Fi 붕괴 구간과 겹침).
+
+**어댑터에 들어갈 발견 2개**: (1) `stream.close()` 뒤 SDK는 `canceled(EndOfStream)`로 "끝"을 알린다 — 오류가 아니다. (2) 닫은 직후 `stop_continuous_recognition()`을 부르면 **대기 중 결과가 유실**된다(burst 3회 중 2회 빈 텍스트). 절차는 close → 세션 종료 대기(결과가 먼저 온다) → 정리용 stop.
+
+### TTS — 왕복·보이스·viseme (데스크탑에서 42문장, 실패 0)
+SunHi·InJoon·HyunsuMultilingual × (응답형 5문장 + 모음 분리 9문장), synthesizer 상주, `Raw16Khz16BitMonoPcm`.
+
+| 길이 | 글자 | 왕복 | 오디오 |
+| --- | --- | --- | --- |
+| short | 8~9 | 0.11~0.34 s (첫 요청 0.25~0.34) | 2.0~3.1 s |
+| medium | 26~30 | 0.12~0.22 s | 4.0~6.1 s |
+| long | 66 | 0.23~0.34 s | 10.9~11.8 s |
+
+첫 문장 TTS 2.5~3 s → **0.1~0.3 s**. 청크 스트리밍 TTS는 필요 없다(로드맵 판단 확정).
+
+**ko-KR viseme ID 매핑**(세 보이스 일치, 모음 행의 지배 ID):
+
+| 한국어 | Azure ID | 우리 viseme | 비고 |
+| --- | --- | --- | --- |
+| ㅏ | 2 (ɑ) | a | |
+| ㅓ | 1 (æ ə ʌ) | a | 기존 두 표와 같은 판단 |
+| ㅐ, ㅔ | 4 (ɛ ʊ) | e | 둘 다 4 — 합류 |
+| ㅗ | 8 (o) | o | |
+| ㅜ | 7 (w u) | u | |
+| ㅡ, ㅣ | 6 (j i ɪ) | i | Azure도 ㅡ를 비원순으로 — 기존 표의 "ㅡ→i" 규칙과 일치 |
+| ㅁㅂㅍ | 21 | m(closed) | 자음이라 점유 13~22% |
+| 0 | silence | x | |
+| 19(n/d/t)·20(k/g)·14(l)·15(s)·13(r) | 자음 | 가까운 모음 | 기존 `transparent` 규칙 |
+
+이벤트 구조: 42개 전부 오프셋 단조증가, 오디오 끝을 넘는 이벤트 0, 첫 이벤트 silence @0~50 ms, 마지막 silence(꼬리 무음이 자연히 덮임). `끝 = 다음 시작, 마지막 = 오디오 끝`으로 변환하면 `pieces()` 계약의 `sample_counts`가 된다. y-활음(ㅛ·ㅕ)은 **6이 ~130 ms 먼저** 찍히고 모음 ID가 따라온다("요" = 6→8) — 기존 표는 활음을 핵모음으로 뭉갰으니 `TTS_VISEME_MIN_SECONDS`로 흡수되거나 짧게 i가 보인다. 실기로 판단. `WordBoundary`도 온다(구두점 포함).
+
+### RPi Wi-Fi 붕괴 — 이번 밤의 가장 큰 발견
+RPi(KT_GiGA_2G, **2.4 GHz** ch4, 신호 53%, powersave disable)에서 STT·TTS를 연속으로 돌리자 21:33:40쯤부터 경로가 무너졌다: STT tail 14.8 s, TTS는 거의 전부 "Timeout while synthesizing, RTF 2~7, frame interval 3000+ms"로 실패. 부하 중 **공유기까지 한 홉 핑 40% 손실·최대 220 ms**, 부하 멈춘 뒤에도 10% 손실·평균 227 ms·최대 831 ms. 5 MB 다운로드 90초 내 미완(<55 KB/s). 같은 시각 데스크탑은 0% 손실, 5.2 MB/s, 42문장 전부 성공. **서비스가 아니라 RPi 무선 링크 문제.** STT·TTS·뇌가 전부 망을 타게 되는 설계(트랙 C)에서 이건 선결 조건이다 — 유선(eth0 있음) 또는 5 GHz.
+
+**→ 5 GHz로 전환 (22:10, `KT_GiGA_5G_hahahoho` 5765 MHz ch153, 신호 48%, 270 Mbit/s, IP 유지, 2G 프로필 autoconnect off).** 재측정(22:18, 부하 중 한 홉 핑을 깔고):
+
+| | 2.4 GHz (21:33~) | 5 GHz (22:18) | 데스크탑 |
+| --- | --- | --- | --- |
+| 한 홉 핑, 부하 중 | 40% 손실, max 220 ms | **0% 손실**, avg 19 ms, max 253 ms(지터만) | 0% |
+| 5 MB 다운로드 | 90 s 미완(<55 KB/s) | 2.07 MB/s | 5.2 MB/s |
+| STT tail (실녹음 2개 × 3) | −0.1~+0.24 → 붕괴 뒤 14.8 s | **−0.13 ~ +0.02 s**, 세션 종료 +0.05~0.53 s | — |
+| TTS 42문장 | 대부분 실패(RTF 2~7) | **42/42**, 0.12~0.26 s(첫 연결 0.32~0.48) | 42/42, 0.11~0.34 s |
+
+RPi에서도 데스크탑 수치가 나온다. 5 GHz 스캔은 첫 `nmcli dev wifi list --rescan`엔 안 보였고 12초 기다린 두 번째에 잡혔다(스캔이 느리다). viseme 점유율은 데스크탑 실행과 **소수점까지 동일** — 같은 텍스트·보이스는 결정적으로 합성된다. 어댑터 단위 테스트 픽스처로 안전.
+
 ## 미룬 개선 (deferred)
+- ~~RPi 네트워크~~ — 5 GHz 전환으로 해결(위 표). 남은 것: 유휴 핑 max 250~330 ms 지터는 남아 있다(손실은 0). 음성 턴에 영향이 보이면 eth0 유선이 다음 수.
+- **Azure 어댑터 착수** — 측정은 끝났다. STT: `audio/app/transcriber.py` Protocol(whisper/azure) + 루프가 웨이크워드 시점에 세션을 열고 `done`에 `stream.close()`; TTS: `tts/app/viseme.py`에 `azure_visemes` 표(위 매핑) + `tts/app/engines/azure.py`가 `pieces()` 구현. 테스트 픽스처: `scripts/azure-probe/out/tts-desktop/*/*.json`(gitignore — 몇 개를 `tts/tests/fixtures/`로 복사).
+- **마이크 포화** — 현재: 11-01 녹음이 −0 dBFS. 왜 안 했나: 11-08 녹음은 정상이라 이미 바뀐 조건일 수 있다(거리·게인). 착수 지점: `audio` 진단 로그의 `mic peak`가 −3 dBFS를 넘으면 경고 한 줄.
+- **STT NoMatch 처리** — 현재: 1.2초 클립 1건이 NoMatch. 착수 지점: 어댑터에서 NoMatch는 지금의 422(`no_speech_error`)와 같은 경로로.
 - **인증 오류를 그대로 읽는다** — 현재: 모델 텍스트 블록에 온 "Failed to authenticate…"가 `reply`로 나간다. 왜 안 했나: 이번에 처음 봤다. 착수 지점: `sdk_agent.py` `turn_translator`에서 `ResultMessage.is_error` 또는 해당 문구를 잡아 `error`로 바꾸고, 호스트가 집의 `host.json`에 둔 한국어 안내("관리자가 로그인해야 해요")를 말하게.
 - **OAuth 만료 자체** — 무인 기기인데 몇 주마다 로그인이 풀린다. 선택지: `claude setup-token`(장기 토큰, `CLAUDE_CODE_OAUTH_TOKEN`으로 `rpi-up.sh`에) 또는 만료 전 주기적 대화로 리프레시 유지(이번엔 일주일 방치 뒤 리프레시도 실패). 관리자 결정 사항.
 - **오래된 schedule 항목이 기동 때 발화** — 현재: 지난 항목은 전부 "due"로 본다. 착수 지점: `scheduler.tick`에서 `now - at`가 임계(예: 1시간) 넘으면 `failed/`로 옮기고 발화하지 않음.

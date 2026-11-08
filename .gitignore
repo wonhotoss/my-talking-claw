@@ -7,3 +7,5 @@ __pycache__/
 .pytest_cache/
 tts/voices/
 voice/models/
+scripts/azure-probe/out/
+scripts/azure-probe/.env
