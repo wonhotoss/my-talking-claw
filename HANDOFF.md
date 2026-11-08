@@ -87,4 +87,7 @@
 | [platform-notes.md](platform-notes.md) | RPi4 vs IdeaPad, Piper 실측, RPi 투영·빌드 블로커 |
 | [hardware-notes.md](hardware-notes.md) | 마이크/스피커 비교·확정 BOM·AEC 원리·**쿨링 계획** |
 | [음성IO-로드맵.md](음성IO-로드맵.md) | 3단계 로드맵 + 최종 아키텍처 결정 |
+| [뇌중심-로드맵.md](뇌중심-로드맵.md) | STT·TTS Azure 전환 결정·실측(트랙 A·B 완료), 뇌는 RPi에 |
+| [다음-개선-후보.md](다음-개선-후보.md) | **기계적 개선** 후보·순서: 안정화, 얼굴 파츠, 핫워드, 별도 미디어 스피커 |
+| [뇌-상호작용-로드맵.md](뇌-상호작용-로드맵.md) | **뇌↔시스템 계층**: 권한 구멍(Read·WebFetch 전역), D-0 도구 규약, 도구 목록, 시스템→뇌 신호, 가상 케이스 14개 |
 | [clova-track/](clova-track/) | 클로바 리버싱·분해 트랙 |
