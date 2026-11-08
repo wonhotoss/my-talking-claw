@@ -109,6 +109,11 @@ class audio_loop:
         self.queue_ready = threading.Condition(self.lock)
         self.stop_playback = threading.Event()
         self.synthesizer = ThreadPoolExecutor(max_workers=1)
+        # Cancelling a turn is an HTTP round trip to the backend (and from
+        # there an interrupt to the brain) - day-11 live it took ~1 s, during
+        # which the listen thread must not stop pulling frames.
+        self.canceller = ThreadPoolExecutor(max_workers=1)
+        self.pending_cancel: Future | None = None
         self.phase = "idle"
         self.speaking = False
         self.last_seq = 0
@@ -302,11 +307,13 @@ class audio_loop:
         # On a turn that already ended the backend answers cancelled=false; cheap.
         if turn_id is not None:
             log(f"barge-in: cancelling turn {turn_id}")
+            self.pending_cancel = self.canceller.submit(self.cancel_turn, turn_id)
 
-            try:
-                self.client.cancel_turn(turn_id)
-            except Exception as error:  # noqa: BLE001
-                log(f"cancel failed: {error}")
+    def cancel_turn(self, turn_id: str) -> None:
+        try:
+            self.client.cancel_turn(turn_id)
+        except Exception as error:  # noqa: BLE001
+            log(f"cancel failed: {error}")
 
     def wake_threshold(self) -> float:
         return (
@@ -355,6 +362,11 @@ class audio_loop:
 
             if self.settings.wake_chime:
                 self.sink.play(chime(self.sink.sample_rate), threading.Event())
+                # The frames captured so far hold the wake word's tail and the
+                # chime itself - the speaker sits next to the microphone and the
+                # chime alone drives it to -0 dBFS (day-11 dumps). Neither is the
+                # user's speech; the recording starts after the cue.
+                self.source.flush()
 
             verdict, recorded = self.record_utterance(frames, session)
 

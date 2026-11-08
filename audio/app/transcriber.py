@@ -31,13 +31,19 @@ path; the two services are separate uv projects. A third copy means it is time
 for a package.
 """
 
+import sys
 import threading
+import time
 from typing import Protocol
 
 import numpy as np
 
 from app.device_client import device_client, no_speech_error
 from app.pcm import wav_bytes
+
+
+def log(message: str) -> None:
+    print(f"[audio] {time.strftime('%H:%M:%S')} {message}", file=sys.stderr, flush=True)
 
 
 class transcription_session(Protocol):
@@ -157,6 +163,10 @@ class azure_session:
         if self.error != "":
             raise RuntimeError(f"azure stt canceled: {self.error}")
 
+        # What the service actually said, for the day the text is wrong: a
+        # `recognized` of "" is its NoMatch, partials show how far it got.
+        log(f"azure stt: recognized {self.recognized!r}, partials {len(self.partials)}"
+            f"{' last ' + self.partials[-1]!r if self.partials else ''}")
         text = transcript(self.recognized, self.partials)
 
         if text == "":

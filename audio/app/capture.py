@@ -49,7 +49,12 @@ class microphone:
         self.device = device
         self.sample_rate = sample_rate
         self.frame_samples = frame_samples
-        self.pending: queue.Queue[np.ndarray] = queue.Queue(maxsize=8)
+        # 32 frames = 2.5 s. Day-11 live: at 8 (640 ms) the chime plus a slow
+        # cancel request overflowed it, and because a full queue drops the
+        # *newest* frame, the first words of the question were lost while the
+        # wake word's tail was kept. Staleness is handled by flush(), not by
+        # keeping the queue short.
+        self.pending: queue.Queue[np.ndarray] = queue.Queue(maxsize=32)
         self.dropped = 0
         self.reopened = 0
 

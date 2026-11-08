@@ -75,7 +75,11 @@ health() {
 
 screen_keep_on() {
   pkill -x swayidle || true
-  wlopm --on '*' >/dev/null 2>&1 || true
+  # By name, not '*': day-11 the stack came up with the DSI panel still off after
+  # swayidle had blanked it, and `wlopm --on '*'` had been silently swallowed.
+  for output in $(wlopm 2>/dev/null | awk '{print $1}'); do
+    wlopm --on "$output" || echo "could not turn on $output"
+  done
 }
 
 screen_restore_blanking() {

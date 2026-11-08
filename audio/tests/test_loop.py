@@ -256,6 +256,9 @@ def test_wake_word_during_a_turn_cancels_it_and_clears_the_queue() -> None:
 
     loop.listen(iter(silent(1) + voiced(5) + silent(9)))
 
+    # The cancel request runs off the listen thread; wait for it before looking.
+    assert loop.pending_cancel is not None
+    loop.pending_cancel.result()
     assert ("cancel_turn", "t_1") in client.calls
     assert len(loop.queue) == 0
     assert loop.stop_playback.is_set()
@@ -346,6 +349,27 @@ def test_recordings_are_kept_when_a_dump_dir_is_set(tmp_path) -> None:
     assert len(kept) == 1 and kept[0].startswith("utterance-") and kept[0].endswith(".wav")
 
 
+def test_the_chime_frames_are_flushed_before_recording() -> None:
+    import dataclasses
+
+    loop, _, _ = make_loop(fake_wake({1}))
+    loop.settings = dataclasses.replace(settings, wake_chime=True)
+
+    loop.listen(iter(silent(1) + voiced(5) + silent(9)))
+
+    # Once after the chime (its own sound and the wake word's tail are not the
+    # user's speech), once after the turn as before.
+    assert loop.source.flushed == 2
+
+
+def test_without_a_chime_nothing_is_flushed_before_recording() -> None:
+    loop, _, _ = make_loop(fake_wake({1}))
+
+    loop.listen(iter(silent(1) + voiced(5) + silent(9)))
+
+    assert loop.source.flushed == 1
+
+
 def test_the_wake_chime_plays_before_recording_when_enabled() -> None:
     import dataclasses
 
@@ -386,4 +410,7 @@ def test_a_lower_bar_applies_while_the_device_is_speaking() -> None:
     loop.adopt_turn("t_1")
     loop.speaking = True
     loop.listen(iter(silent(1) + voiced(5) + silent(9)))
+    # The cancel request runs off the listen thread; wait for it before looking.
+    assert loop.pending_cancel is not None
+    loop.pending_cancel.result()
     assert ("cancel_turn", "t_1") in client.calls
