@@ -1,6 +1,6 @@
 # HANDOFF — my-talking-claw
 
-이 세션에서 이어서 작업하기 위한 인수인계. 마지막 갱신 2026-11-01 저녁 (day 9 실기 끝, day 10 데스크탑 구현 끝).
+이 세션에서 이어서 작업하기 위한 인수인계. 마지막 갱신 2026-11-08 (day 11 쿨러 장착·실측).
 다음 세션은 **데스크탑 Claude Code가 RPi에 SSH**로 작업한다(`hahahoho@172.30.1.40`, 키 등록됨, 저장소 `~/Documents/my-talking-claw`).
 
 ## 한 줄
@@ -12,9 +12,10 @@
 - **웨이크워드는 자리표시자 3개 동시**: `hey jarvis` / `alexa` / `hey mycroft` (openWakeWord 기본 모델). 평소 자리에서 0.8~1.0으로 잡힌다. 한국어 "누구야"는 **미해결**(기성 모델 없음 — Porcupine 커스텀 또는 openWakeWord 학습).
 - **STT는 base beam 1** (day-9 결정, 후보 5개 비교표는 day-9.md "STT 모델 결정"). 녹음은 VAD 스팬으로 **잘라서** 보낸다(무음 폭주 86s→10s).
 - **AEC 없음.** ReSpeaker Lite USB 펌웨어 2.0.5의 AEC는 실측상 작동 안 함(재생 중 녹음을 STT가 그대로 받아씀). 사용자 결정: **추후 과제, 검증된 기기로 재시도.** 재생 중 웨이크워드(barge-in)는 임계 0.2로 best-effort — 실측 점수 0.24. 소프트웨어 AEC는 루프가 재생 PCM을 쥐고 있어 이제 가능(미착수).
-- **열이 모든 수치를 오염시킨다.** 팬 없음. 상주 부하(루프 40% + Chromium 2×17%)로 유휴 76~80°C, STT 뒤 84°C 스로틀. `claude -p` 스폰이 2.6s(시원)→6.5s(지금). **쿨링(hardware-notes "쿨링" 1단계)이 다음 측정 전 선행 과제.**
+- **열은 해결됐다(day 11, 2026-11-08).** 30mm 팬 5V + 구리 방열판 장착 뒤 전체 스택 유휴 **37~40°C**, STT 4회 연속 최고 **52°C**, 스로틀 비트 없음(전: 72~74 / 84°C). 팬 소음은 마이크 RMS -43 dBFS, "알렉사" 7/7. 온도 연동 팬·아머 케이스 불필요. 수치: [day-11.md](day-11.md).
 - 테스트: backend 63 / agent-gateway 19 / voice 7 / tts 65 / **audio 30** / frontend `tsc` 통과.
-- **커밋 안 됨.** 이 세션의 변경 전부 데스크탑 작업 트리에 미커밋이고, RPi 작업 트리엔 같은 내용이 **로컬 수정으로 복사**돼 있다. 절차: 데스크탑에서 커밋·푸시 → RPi에서 `git checkout -- . && git pull`.
+- **RPi 동기화는 git bundle.** 데스크탑에서 커밋 → `git bundle create` → scp → RPi에서 `git fetch <bundle> main && git merge --ff-only FETCH_HEAD`(푸시 없이). RPi 작업 트리는 깨끗하다(`stash@{0}`에 옛 rpi-up.sh 복사본만).
+- **RPi CLI 로그인이 만료된다.** 11-08에 일주일 방치 뒤 "OAuth session expired and could not be refreshed" — 두뇌가 그 문장을 그대로 읽었다. 관리자가 RPi에서 `claude` → `/login`. 장기 토큰(`claude setup-token`) 전환은 day-11 미룬 개선.
 
 ### 턴 한 번의 실측 (14:10, 80°C, 툴 없는 질문)
 말 끝 → 엔드포인트 0.7s → STT 5.9s → 포스트 → 첫 소리 13.5s(= `claude -p` 스폰 **6.5s** + 에이전트 2.7s + 첫 문장 TTS 2.8s) → 6문장 24초 재생. **말 끝에서 첫 소리까지 ~20s.** 분해와 줄일 곳은 day-9.md "여섯 번째".
@@ -31,7 +32,7 @@
 
 ## 다음 할 일 (우선순위)
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.
-2. **쿨링** — 팬 도착 → 장착 → day-9 측정 반복(hardware-notes 2단계 ②: 팬 소음 녹음·"알렉사" 점수) → **RPi 전체 스택으로 day-10 두뇌 턴 전체 재측정**(말 끝→첫 소리).
+2. ~~쿨링~~ — 끝(day-11). 남은 것: **RPi 로그인 뒤 전체 스택 턴 재측정**(말 끝→첫 소리, day-9 "여섯 번째"와 비교) — 이제 시원한 기준선.
 3. ~~RPi 두뇌 전환~~ — 끝. ~~문장 단위 선출력~~ — 끝.
 4. **모니터 번인 대책** — 스택이 떠 있는 동안 화면이 항상 켜져 있다(swayidle을 끈다). 얼굴이 정적이라 번인 위험. 후보: 대기 중 화면 끄기 + 웨이크워드·발화 때 `wlopm --on`, 또는 얼굴을 몇 분마다 조금씩 움직이기.
 5. **한국어 웨이크워드 "누구야"** — (A) Porcupine: 계정+AccessKey, 콘솔에서 몇 분, 바이너리 비공개. (B) openWakeWord 커스텀: Piper ko로 합성 데이터, GPU 1~2h. `audio/app/wake_word.py` 인터페이스 하나 교체.
@@ -75,6 +76,8 @@
 | [overview.md](overview.md) · [milestone-1.md](milestone-1.md) · day-1~7.md | 초기 설계·경과. day-6 = Piper 전환, day-7 = 이벤트 스트림 |
 | [day-8.md](day-8.md) | 서버 스택을 RPi로. 실측·열·tiny 비교 |
 | [day-9.md](day-9.md) | ReSpeaker 실측(AEC 안 됨), STT 모델 결정, 키오스크, **네이티브 오디오 루프 설계·구현·실기 6회** |
+| [day-10.md](day-10.md) | 두뇌 계층: 뇌의 집(관리자 설정) + Agent SDK 상주 세션, 스케줄, 문장 단위 선출력 |
+| [day-11.md](day-11.md) | 쿨러 장착 Q&A와 실측(온도·팬 소음·웨이크워드), 로그인 만료 |
 | [README.md](README.md) | 각 서비스 실행법·env 표·이벤트 계약(day-9 이벤트 3종, `audio/` 절 포함)·검증. **명령은 여기가 원본** |
 | [agent-latency-notes.md](agent-latency-notes.md) | 에이전트 홉 분해·기각된 가설·지연 조사 런북 |
 | [platform-notes.md](platform-notes.md) | RPi4 vs IdeaPad, Piper 실측, RPi 투영·빌드 블로커 |
