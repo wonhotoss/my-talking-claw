@@ -172,7 +172,7 @@ RPi에 azure·azure로 올린 뒤 "알렉사 → 차임 → 질문"에 답이 �
 - **마이크 포화** — 현재: 11-01 녹음이 −0 dBFS. 왜 안 했나: 11-08 녹음은 정상이라 이미 바뀐 조건일 수 있다(거리·게인). 착수 지점: `audio` 진단 로그의 `mic peak`가 −3 dBFS를 넘으면 경고 한 줄.
 - ~~STT NoMatch 처리~~ — 구현됨(`transcript()`가 빈 문자열이면 `no_speech_error`).
 - **게이트웨이 SDK 세션 워밍업** — 현재: 재기동 뒤 첫 턴이 SDK 연결에 ~4 s를 더 쓴다(23:18 실측 6.74 s vs 2.49 s). 착수 지점: `agent-gateway/app/sdk_agent.py`의 연결(`connected (resume=…)`)을 서버 lifespan에서 미리 수행. TTS `warm_up()`과 같은 패턴.
-- **Azure를 기본값으로** — 현재: `rpi-up.sh` 기본은 whisper·piper라 env 없이 올리면 로컬로 돌아간다(바탕화면 아이콘 포함). 왜 안 했나: 실기 2턴 확인 직후, 사용자 결정 사항. 착수 지점: `rpi-up.sh`의 `${STT_ENGINE:-whisper}`·`${TTS_ENGINE:-piper}` 기본값과 `my-talking-claw.desktop`.
+- ~~Azure를 기본값으로~~ — 사용자 결정으로 바꿈(23:30): `rpi-up.sh` 기본 `STT_ENGINE=azure TTS_ENGINE=azure`. 로컬은 env로 수동 전환.
 - **주변 말소리 유입** — 현재: 마이크가 무지향이라 TV·유튜브 말소리가 전사에 섞인다(23:18 "주로 일각에서는"). 착수 지점: Azure `recognizing` partial을 보며 화자 변화를 자르기는 어렵다; 현실적 대안은 ReSpeaker 빔포밍 펌웨어(AEC와 같은 트랙) 또는 발화 전 소음 레벨로 민감도 조정.
 - **인증 오류를 그대로 읽는다** — 현재: 모델 텍스트 블록에 온 "Failed to authenticate…"가 `reply`로 나간다. 왜 안 했나: 이번에 처음 봤다. 착수 지점: `sdk_agent.py` `turn_translator`에서 `ResultMessage.is_error` 또는 해당 문구를 잡아 `error`로 바꾸고, 호스트가 집의 `host.json`에 둔 한국어 안내("관리자가 로그인해야 해요")를 말하게.
 - **OAuth 만료 자체** — 무인 기기인데 몇 주마다 로그인이 풀린다. 선택지: `claude setup-token`(장기 토큰, `CLAUDE_CODE_OAUTH_TOKEN`으로 `rpi-up.sh`에) 또는 만료 전 주기적 대화로 리프레시 유지(이번엔 일주일 방치 뒤 리프레시도 실패). 관리자 결정 사항.

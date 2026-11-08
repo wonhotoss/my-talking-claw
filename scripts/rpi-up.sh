@@ -11,12 +11,12 @@
 #   - whisper defaults to base + beam 1 (day-9 decision, see day-9.md "STT 모델 결정": on ReSpeaker
 #     input tiny hallucinates and then pays a 40-50s temperature-fallback tail; base beam 1 is
 #     accurate with no tail at RTF 0.65-0.74). WHISPER_MODEL=<local dir> / WHISPER_BEAM_SIZE override.
-#   - tts runs natively (no Docker on this RPi) with the env values from tts/docker-compose.yml `piper`.
-#     TTS_ENGINE=azure switches to Azure Speech (day-11 probe: first sentence 0.1-0.3s vs Piper 2.5-3s);
-#     the key comes from scripts/azure-probe/.env (gitignored, never inside the brain's home). Switching
-#     back is manual: TTS_ENGINE=piper and rerun - no runtime fallback by decision (뇌중심-로드맵.md).
-#   - STT_ENGINE=azure streams the utterance to Azure while the user talks (text ready at the endpoint,
-#     vs whisper's 6.8s) and goes to BOTH the audio loop and the voice service, so the phone follows.
+#   - tts and stt are Azure Speech by default (day-11: first sentence 0.1-0.3s vs Piper 2.5-3s; the
+#     utterance streams to Azure while the user talks, text ready at the endpoint vs whisper's 6.8s).
+#     The key comes from scripts/azure-probe/.env (gitignored, never inside the brain's home).
+#     STT_ENGINE goes to BOTH the audio loop and the voice service, so the phone follows. Falling back
+#     is manual: TTS_ENGINE=piper STT_ENGINE=whisper and rerun - no runtime fallback by decision
+#     (뇌중심-로드맵.md). tts then runs natively with the env values from tts/docker-compose.yml `piper`.
 #   - agent-gateway runs the day-10 SDK brain with its home in ~/claw-home (AGENT_BRAIN=cli brings back
 #     the per-turn claude -p). The home's .claude/settings.json is the tool policy now.
 #   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
@@ -40,9 +40,11 @@ brain_home="${BRAIN_HOME:-$HOME/claw-home}"
 agent_brain="${AGENT_BRAIN:-sdk}"
 whisper_model="${WHISPER_MODEL:-base}"
 whisper_beam_size="${WHISPER_BEAM_SIZE:-1}"
-tts_engine="${TTS_ENGINE:-piper}"
+# Azure by default since day-11 (end of speech -> first sound ~3.3 s against 14.5 s local).
+# TTS_ENGINE=piper / STT_ENGINE=whisper bring the local engines back for the run.
+tts_engine="${TTS_ENGINE:-azure}"
 tts_voice="${AZURE_TTS_VOICE:-ko-KR-SunHiNeural}"
-stt_engine="${STT_ENGINE:-whisper}"
+stt_engine="${STT_ENGINE:-azure}"
 # The Azure Speech key, exported so the tmux server (started below) hands it to every window.
 # One gitignored file serves the probes and the stack; the brain can Read its home but not this.
 azure_env="$repo/scripts/azure-probe/.env"

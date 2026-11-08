@@ -196,7 +196,7 @@ curl -s -X POST http://localhost:8200/speak -H "Content-Type: application/json" 
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `TTS_ENGINE` | `melotts` | `melotts`, `piper`, `azure`. 이미지가 각자 자기 값을 박아둔다; RPi는 `rpi-up.sh`의 `TTS_ENGINE`(기본 piper). |
+| `TTS_ENGINE` | `melotts` | `melotts`, `piper`, `azure`. 이미지가 각자 자기 값을 박아둔다; RPi는 `rpi-up.sh`의 `TTS_ENGINE`(기본 **azure**, day-11). |
 | `TTS_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
 | `TTS_SPEED` | `1.0` | 말하기 속도. |
 | `TTS_VISEME_MIN_SECONDS` | `0.04` (piper는 `0.02`) | 이보다 짧은 viseme 구간은 이웃에 흡수(깜빡임 방지). |
@@ -382,7 +382,7 @@ RPi엔 `libportaudio2`(apt)가 필요하다. 첫 실행에 openWakeWord 모델(~
 | `AUDIO_PLAYBACK_GAIN_DB` | `-12` | day-9 실측: 사용자가 "충분"하다고 한 음량이고, 마이크 포화(0dB에서 피크 -0.5 dBFS)를 벗어난다. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` / `WAKE_WORD_THRESHOLD_WHILE_SPEAKING` | `hey_jarvis,alexa,hey_mycroft` / `0.5` / `0.2` | **자리표시자**(쉼표로 여러 개, 아무거나 하나면 깨어남). 한국어 "누구야"는 기성 모델이 없다(day-9.md "열린 결정"). 한국어 화자의 "hey jarvis"는 점수가 0.0~0.65로 들쭉날쭉해서(day-9 실기) 발음하기 쉬운 "alexa"를 같이 올렸다. `app/wake_word.py`의 인터페이스 하나로 교체. |
 | `VAD_THRESHOLD` | `0.5` | silero(openWakeWord 동봉). |
-| `STT_ENGINE` | `whisper` | `whisper` 또는 `azure`. voice 서비스와 같은 값으로(`rpi-up.sh`가 맞춘다). |
+| `STT_ENGINE` | `whisper` | `whisper` 또는 `azure`. voice 서비스와 같은 값으로(`rpi-up.sh`가 맞추며 거기선 기본 **azure**). |
 | `STT_LANGUAGE` | `ko` | whisper용 짧은 코드. |
 | `AZURE_STT_LANGUAGE` / `AZURE_STT_TIMEOUT_SECONDS` | `ko-KR` / `5` | azure용. 키·리전은 `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`. |
 | `ENDPOINT_TRAILING_SILENCE_MS` / `NO_SPEECH_TIMEOUT_MS` / `MAX_UTTERANCE_MS` / `MIN_SPEECH_MS` | `700` / `5000` / `15000` / `300` | 발화 끝 판정. `app/endpointer.py`. |
