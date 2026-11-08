@@ -146,8 +146,34 @@ RPi에서도 데스크탑 수치가 나온다. 5 GHz 스캔은 첫 `nmcli dev wi
 - 테스트: audio 43(+13: 세션 프로토콜 호출 순서·abort·실패 격리, azure_session 콜백 구동), voice 18(+11: PyAV 디코드·리샘플 실제, 세션, 선택).
 - `rpi-up.sh`: `STT_ENGINE`(기본 whisper)을 voice·audio 창 둘 다에, azure 엔진이 하나라도 있으면 키 필수, whisper일 때만 모델 디렉터리 검사.
 - 미룬 것: partial 자막(`recognizing` → `device_state`), 세션당 recognizer 재생성 비용(start 0.16 s — 차임 0.35 s 안이라 지금은 무시), `~/claw-recordings` 덤프는 그대로(엔진 무관).
+
+### 첫 Azure 음성 턴 실패 (22:56) — 원인은 Azure가 아니라 웨이크 직후 입력 유실
+RPi에 azure·azure로 올린 뒤 "알렉사 → 차임 → 질문"에 답이 없었다. 로그: `wake word alexa (0.68)` → `barge-in: cancelling turn azure-check-1`(**1초 뒤**) → `endpoint done: speech 560ms of 3040ms` → `stt 0.09s: nothing recognised`, 같은 5초 구간에 **`dropped frames 5`**. 덤프(`utterance-20261108-225645.wav`, 2.4 s)는 피크 **−0 dBFS**, 오프라인 Azure도 "작년 여름"(쓰레기). 프레임 dtype은 int16로 정상.
+
+재구성: 직전 텍스트 턴 때문에 `accepted_turn`이 있었고 `cancel_turn` HTTP가 **리슨 스레드에서 동기로 ~1 s**, 이어 차임 0.35 s — 그동안 캡처 큐(8프레임 = 640 ms)가 넘쳤다. 가득 찬 큐는 **가장 새 프레임을 버리므로** 질문의 앞부분이 사라지고 웨이크 꼬리·차임이 남았다. 차임은 스피커가 마이크 옆이라 녹음을 −0 dBFS로 밀어 넣는다 — **11-01 녹음 11개의 포화도 같은 원인**(사용자가 차임과 동시에 말을 시작하면 트림 창에 차임이 들어온다). Azure는 0.09 s에 정직하게 "없음"을 답했다.
+
+고침(커밋 `8158bf4`·`90969e2`): cancel을 executor로(`pending_cancel`), **차임 뒤 `source.flush()`**(차임·웨이크 꼬리 제거 — 차임 중에 시작한 말은 버려진다, 차임이 "지금 말하라"는 신호라는 day-9 의도 그대로), 큐 8→32프레임(2.5 s), `finish`가 `recognized`/partials를 로그. 테스트 45(+2).
+
+부수: `rpi-up.sh`가 켜 둔 줄 안 화면이 꺼져 있었다 — swayidle이 끈 상태에서 `wlopm --on '*'`가 먹지 않았다. 출력 이름(`DSI-1`)을 열거해 켜도록 수정. 또 하나, 테스트를 `| tail`로 자른 && 체인이 **f-string 문법 오류를 가린 채 푸시·배포**돼 audio가 한 번 죽었다(23:00) — 배포 체인은 `pipefail`로.
+
+### 음성 턴 실측 — Azure STT·TTS (23:18, 23:21, RPi 5 GHz, 전체 스택, 사용자 발화)
+
+| 구간 | day-9 (80°C, 스폰) | day-11 오후 (whisper·Piper) | **Azure 1턴** (재기동 직후) | **Azure 2턴** (정상 상태) |
+| --- | --- | --- | --- | --- |
+| 웨이크워드 | 0.8~1.0 | 0.99 | 0.88 | 0.84 |
+| 말 끝 → 엔드포인트 | 0.7 s | 0.7 s | 0.7 s | 0.7 s |
+| STT | 5.9 s | 6.8 s | **0.19 s** (4.0 s 발화) | **0.09 s** (1.4 s 발화) |
+| 포스트 → 첫 소리 | 13.5 s | 6.9 s | 6.74 s (두뇌 첫 델타 2.25 + TTS + **SDK 세션 연결 ~4 s**, 재기동 뒤 첫 턴만) | **2.49 s** (두뇌 첫 델타 1.63 + TTS ≈0.3 + 큐) |
+| **말 끝 → 첫 소리** | **~20 s** | **~14.5 s** | ~7.6 s | **~3.3 s** |
+
+전사: 1턴 "주로 일각에서는 **일부터 십까지의 합계를 알려줘**." — 사용자 발화 "1부터 10까지의 합계를 알려줘"는 정확, 앞의 사족은 옆에서 틀어 둔 **유튜브 말소리**(방향성 없는 마이크). 2턴(유튜브 끔) "일부터 백까지 합계를 알려줘." — 정확. 두뇌 답은 각각 한 문장(3.0 s·3.5 s 오디오).
+
+로드맵 기대치(4~5 s)보다 좋다. 남은 덩어리는 **두뇌 첫 델타 1.6~2.3 s**뿐이고, 그 다음이 엔드포인트의 trailing silence 0.7 s. 재기동 뒤 첫 턴의 SDK 연결 ~4 s는 day-10부터 있던 비용 — 게이트웨이 기동 때 세션을 미리 여는 워밍업(TTS의 `warm_up`과 같은 꼴)이 다음 후보.
 - **마이크 포화** — 현재: 11-01 녹음이 −0 dBFS. 왜 안 했나: 11-08 녹음은 정상이라 이미 바뀐 조건일 수 있다(거리·게인). 착수 지점: `audio` 진단 로그의 `mic peak`가 −3 dBFS를 넘으면 경고 한 줄.
-- **STT NoMatch 처리** — 현재: 1.2초 클립 1건이 NoMatch. 착수 지점: 어댑터에서 NoMatch는 지금의 422(`no_speech_error`)와 같은 경로로.
+- ~~STT NoMatch 처리~~ — 구현됨(`transcript()`가 빈 문자열이면 `no_speech_error`).
+- **게이트웨이 SDK 세션 워밍업** — 현재: 재기동 뒤 첫 턴이 SDK 연결에 ~4 s를 더 쓴다(23:18 실측 6.74 s vs 2.49 s). 착수 지점: `agent-gateway/app/sdk_agent.py`의 연결(`connected (resume=…)`)을 서버 lifespan에서 미리 수행. TTS `warm_up()`과 같은 패턴.
+- **Azure를 기본값으로** — 현재: `rpi-up.sh` 기본은 whisper·piper라 env 없이 올리면 로컬로 돌아간다(바탕화면 아이콘 포함). 왜 안 했나: 실기 2턴 확인 직후, 사용자 결정 사항. 착수 지점: `rpi-up.sh`의 `${STT_ENGINE:-whisper}`·`${TTS_ENGINE:-piper}` 기본값과 `my-talking-claw.desktop`.
+- **주변 말소리 유입** — 현재: 마이크가 무지향이라 TV·유튜브 말소리가 전사에 섞인다(23:18 "주로 일각에서는"). 착수 지점: Azure `recognizing` partial을 보며 화자 변화를 자르기는 어렵다; 현실적 대안은 ReSpeaker 빔포밍 펌웨어(AEC와 같은 트랙) 또는 발화 전 소음 레벨로 민감도 조정.
 - **인증 오류를 그대로 읽는다** — 현재: 모델 텍스트 블록에 온 "Failed to authenticate…"가 `reply`로 나간다. 왜 안 했나: 이번에 처음 봤다. 착수 지점: `sdk_agent.py` `turn_translator`에서 `ResultMessage.is_error` 또는 해당 문구를 잡아 `error`로 바꾸고, 호스트가 집의 `host.json`에 둔 한국어 안내("관리자가 로그인해야 해요")를 말하게.
 - **OAuth 만료 자체** — 무인 기기인데 몇 주마다 로그인이 풀린다. 선택지: `claude setup-token`(장기 토큰, `CLAUDE_CODE_OAUTH_TOKEN`으로 `rpi-up.sh`에) 또는 만료 전 주기적 대화로 리프레시 유지(이번엔 일주일 방치 뒤 리프레시도 실패). 관리자 결정 사항.
 - **오래된 schedule 항목이 기동 때 발화** — 현재: 지난 항목은 전부 "due"로 본다. 착수 지점: `scheduler.tick`에서 `now - at`가 임계(예: 1시간) 넘으면 `failed/`로 옮기고 발화하지 않음.

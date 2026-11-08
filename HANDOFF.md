@@ -32,11 +32,11 @@
 
 > **2026-11-08 방향 논의**: STT·TTS는 Azure Speech 종량제로, 뇌는 RPi에 남기고 뇌에게 기기(예약·외장기기·얼굴 카드)를 준다. 트랙·범위·의존성은 [뇌중심-로드맵.md](뇌중심-로드맵.md). 우선순위는 미정(사용자 재판단).
 >
-> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). **트랙 A·B 구현 완료**(day-11 "트랙 B 구현"·"트랙 A 구현"): `STT_ENGINE=azure TTS_ENGINE=azure scripts/rpi-up.sh`로 올린다(기본은 아직 whisper·piper — 실기 확인 뒤 기본값 전환 판단). STT는 루프가 쥐는 `transcriber` 심(웨이크워드에 열고 녹음 중 스트리밍), voice 서비스도 같은 env를 따라 폰이 함께 전환. 데스크탑 실측: 말 끝→텍스트 0.04 s, 첫 문장 TTS 0.17~0.31 s.
+> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). **트랙 A·B 구현·실기 완료**(day-11 "트랙 B 구현"·"트랙 A 구현"·"음성 턴 실측 — Azure"): `STT_ENGINE=azure TTS_ENGINE=azure scripts/rpi-up.sh`로 올린다(**기본은 아직 whisper·piper** — 기본값 전환은 미룬 개선). STT는 루프가 쥐는 `transcriber` 심(웨이크워드에 열고 녹음 중 스트리밍), voice 서비스도 같은 env를 따라 폰이 함께 전환. **RPi 실기(23:21): 말 끝→첫 소리 ~3.3 s**(STT 0.09 + 두뇌 첫 델타 1.63 + TTS ≈0.3; day-11 오후 14.5 s). 재기동 뒤 첫 턴만 SDK 연결로 +4 s. 2026-11-08 밤 현재 RPi 스택은 azure·azure로 떠 있다.
 
 ## 다음 할 일 (우선순위)
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.
-2. ~~쿨링~~ — 끝(day-11). 시원한 기준선: **말 끝→첫 소리 ~14.5s**(day-9 20s; 줄어든 건 스폰 제거분). 남은 덩어리는 STT 6.8s(whisper 30초 창 고정 비용)와 첫 문장 TTS.
+2. ~~쿨링~~ — 끝(day-11). ~~STT 6.8s·첫 문장 TTS~~ — Azure로 끝(day-11 밤): **말 끝→첫 소리 ~3.3s**. 남은 덩어리는 두뇌 첫 델타 1.6~2.3s와 trailing silence 0.7s. 기본값 전환·게이트웨이 세션 워밍업은 day-11 미룬 개선.
 3. ~~RPi 두뇌 전환~~ — 끝. ~~문장 단위 선출력~~ — 끝.
 4. **모니터 번인 대책** — 스택이 떠 있는 동안 화면이 항상 켜져 있다(swayidle을 끈다). 얼굴이 정적이라 번인 위험. 후보: 대기 중 화면 끄기 + 웨이크워드·발화 때 `wlopm --on`, 또는 얼굴을 몇 분마다 조금씩 움직이기.
 5. **한국어 웨이크워드 "누구야"** — (A) Porcupine: 계정+AccessKey, 콘솔에서 몇 분, 바이너리 비공개. (B) openWakeWord 커스텀: Piper ko로 합성 데이터, GPU 1~2h. `audio/app/wake_word.py` 인터페이스 하나 교체.
