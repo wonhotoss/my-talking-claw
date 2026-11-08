@@ -165,8 +165,8 @@ class azure_session:
 
         # What the service actually said, for the day the text is wrong: a
         # `recognized` of "" is its NoMatch, partials show how far it got.
-        log(f"azure stt: recognized {self.recognized!r}, partials {len(self.partials)}"
-            f"{' last ' + self.partials[-1]!r if self.partials else ''}")
+        last_partial = f" last {self.partials[-1]!r}" if self.partials else ""
+        log(f"azure stt: recognized {self.recognized!r}, partials {len(self.partials)}{last_partial}")
         text = transcript(self.recognized, self.partials)
 
         if text == "":
