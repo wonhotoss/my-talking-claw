@@ -1,0 +1,194 @@
+{
+  "voice": "ko-KR-SunHiNeural",
+  "label": "ㅁㅂㅍ",
+  "text": "마, 바, 파, 뭐, 버, 퍼, 모, 보",
+  "chars": 22,
+  "round_trip_seconds": 0.21799999999348074,
+  "audio_seconds": 5.975,
+  "sample_rate": 16000,
+  "visemes": [
+    {
+      "viseme_id": 0,
+      "offset_ms": 50.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 100.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 200.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 550.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 700.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 787.5
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 1150.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 1400.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 1537.5
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 1875.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 2087.5
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 2200.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 2387.5
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 2575.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 2750.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 2850.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 3187.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 3412.5
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 3550.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 3887.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 4112.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 4212.5
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 4537.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 4762.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 4850.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 5212.0
+    }
+  ],
+  "word_boundaries": [
+    {
+      "text": "마",
+      "offset_ms": 50.0,
+      "duration_ms": 450.0
+    },
+    {
+      "text": ",",
+      "offset_ms": 600.0,
+      "duration_ms": 37.5
+    },
+    {
+      "text": "바",
+      "offset_ms": 650.0,
+      "duration_ms": 450.0
+    },
+    {
+      "text": ",",
+      "offset_ms": 1200.0,
+      "duration_ms": 150.0
+    },
+    {
+      "text": "파",
+      "offset_ms": 1350.0,
+      "duration_ms": 475.0
+    },
+    {
+      "text": ",",
+      "offset_ms": 1925.0,
+      "duration_ms": 112.5
+    },
+    {
+      "text": "뭐",
+      "offset_ms": 2037.5,
+      "duration_ms": 487.5
+    },
+    {
+      "text": ",",
+      "offset_ms": 2625.0,
+      "duration_ms": 62.5
+    },
+    {
+      "text": "버",
+      "offset_ms": 2700.0,
+      "duration_ms": 437.5
+    },
+    {
+      "text": ",",
+      "offset_ms": 3237.5,
+      "duration_ms": 125.0
+    },
+    {
+      "text": "퍼",
+      "offset_ms": 3362.5,
+      "duration_ms": 475.0
+    },
+    {
+      "text": ",",
+      "offset_ms": 3937.5,
+      "duration_ms": 125.0
+    },
+    {
+      "text": "모",
+      "offset_ms": 4062.5,
+      "duration_ms": 425.0
+    },
+    {
+      "text": ",",
+      "offset_ms": 4587.5,
+      "duration_ms": 125.0
+    },
+    {
+      "text": "보",
+      "offset_ms": 4712.5,
+      "duration_ms": 450.0
+    }
+  ],
+  "wav": "out\\tts-desktop\\ko-KR-SunHiNeural\\08-ㅁㅂㅍ.wav",
+  "error": ""
+}

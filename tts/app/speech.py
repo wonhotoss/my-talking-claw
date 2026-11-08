@@ -196,6 +196,14 @@ class speech_engine:
     def pieces(self, text: str) -> Iterable[speech_piece]:
         raise NotImplementedError
 
+    def warm_up(self) -> None:
+        """Pay the first-request cost at startup instead of on the first turn.
+
+        The local engines load lazily on purpose (the image may never be asked
+        to speak); the cloud engine's cost is a connection, which is worth
+        opening before anyone talks. No-op here; azure overrides it.
+        """
+
     def speak(self, text: str) -> speech_result:
         return build_speech(
             self.pieces(text),

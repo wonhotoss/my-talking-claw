@@ -125,7 +125,16 @@ RPi에서도 데스크탑 수치가 나온다. 5 GHz 스캔은 첫 `nmcli dev wi
 
 ## 미룬 개선 (deferred)
 - ~~RPi 네트워크~~ — 5 GHz 전환으로 해결(위 표). 남은 것: 유휴 핑 max 250~330 ms 지터는 남아 있다(손실은 0). 음성 턴에 영향이 보이면 eth0 유선이 다음 수.
-- **Azure 어댑터 착수** — 측정은 끝났다. STT: `audio/app/transcriber.py` Protocol(whisper/azure) + 루프가 웨이크워드 시점에 세션을 열고 `done`에 `stream.close()`; TTS: `tts/app/viseme.py`에 `azure_visemes` 표(위 매핑) + `tts/app/engines/azure.py`가 `pieces()` 구현. 테스트 픽스처: `scripts/azure-probe/out/tts-desktop/*/*.json`(gitignore — 몇 개를 `tts/tests/fixtures/`로 복사).
+- **Azure 어댑터 착수** — ~~TTS~~ 끝(같은 날 밤, 아래 "트랙 B 구현"). STT: `audio/app/transcriber.py` Protocol(whisper/azure) + 루프가 웨이크워드 시점에 세션을 열고 `done`에 `stream.close()`; voice 서비스도 같은 `STT_ENGINE`을 따라 폰이 함께 전환(PyAV 디코드 → push stream).
+
+## 트랙 B 구현 — `TTS_ENGINE=azure` (22:30~23:00)
+
+- `tts/app/viseme.py` `azure_visemes`: ID 문자열이 기호. 모음 `1,2,5,9,11→a` `4→e` `6→i` `3,8,10→o` `7→u`, `21` closed, `0` silence, `12~20` transparent(가까운 모음). 22개 전부 분류됨을 테스트가 고정.
+- `tts/app/engines/azure.py`: synthesizer 1개 상주(lazy), SSML(`prosody rate`=TTS_SPEED), `Raw16Khz16BitMonoPcm`, viseme 이벤트 → `alignment()`(끝=다음 시작, 마지막=오디오 끝, 선행 공백=0, 오디오 밖 오프셋은 crash) → 기존 `pieces()` 계약. 한 요청 = 조각 하나.
+- `warm_up()`: 서버 lifespan에서 연결 선개방. 실측(데스크탑): 워밍업 없이 첫 `/speak` **1.41 s**(SDK import+연결), 이후 **0.19~0.23 s**.
+- 테스트 95개(+30): 프로브 JSON 4개를 `tts/tests/fixtures/azure/`에 복사해 네트워크 없이 `build_speech`까지 재생. "네, 알겠어요"의 입모양 열 `e a e a i o`(요의 활음 i 포함)를 고정.
+- `rpi-up.sh`: `TTS_ENGINE`(기본 piper)·`AZURE_TTS_VOICE`(기본 SunHi), `scripts/azure-probe/.env`가 있으면 source. azure인데 키가 없으면 기동 거부.
+- 미룬 것: 단어 경계(`WordBoundary`)로 다문장 요청을 segments로 나누기 — 백엔드가 문장 단위로 부르므로 지금은 불필요. `TTS_VISEME_MIN_SECONDS` Azure 전용값 — 0.02로 실기 뒤 판단.
 - **마이크 포화** — 현재: 11-01 녹음이 −0 dBFS. 왜 안 했나: 11-08 녹음은 정상이라 이미 바뀐 조건일 수 있다(거리·게인). 착수 지점: `audio` 진단 로그의 `mic peak`가 −3 dBFS를 넘으면 경고 한 줄.
 - **STT NoMatch 처리** — 현재: 1.2초 클립 1건이 NoMatch. 착수 지점: 어댑터에서 NoMatch는 지금의 422(`no_speech_error`)와 같은 경로로.
 - **인증 오류를 그대로 읽는다** — 현재: 모델 텍스트 블록에 온 "Failed to authenticate…"가 `reply`로 나간다. 왜 안 했나: 이번에 처음 봤다. 착수 지점: `sdk_agent.py` `turn_translator`에서 `ResultMessage.is_error` 또는 해당 문구를 잡아 `error`로 바꾸고, 호스트가 집의 `host.json`에 둔 한국어 안내("관리자가 로그인해야 해요")를 말하게.

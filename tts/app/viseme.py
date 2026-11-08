@@ -24,6 +24,10 @@ viseme_silence = "x"
 viseme_neutral = "n"
 viseme_closed = "m"
 
+# Azure's ID for silence, as a symbol of the azure_visemes table below. The
+# azure engine inserts it for the gap before the first event.
+viseme_silence_id = "0"
+
 
 @dataclass(frozen=True)
 class symbol_table:
@@ -221,6 +225,50 @@ korean_ipa = symbol_table(
     closed=ipa_closed,
     silence=ipa_silence,
     transparent=ipa_transparent,
+)
+
+
+# --- Azure Speech: viseme IDs -----------------------------------------------
+#
+# Azure returns no phonemes, only its 22 viseme IDs (0..21, defined once for
+# en-US and reused by every voice), each with a start offset. The symbols here
+# are those IDs as decimal strings, so the engine-independent shaping (nearest
+# vowel for consonants, flicker merging) applies to Azure output unchanged.
+#
+# Which ID each Korean vowel lands on was measured on the ko-KR voices, not
+# read off the en-US chart: SunHi, InJoon and Hyunsu agree (day-11.md, Azure
+# probe): ㅏ→2, ㅓ→1, ㅐ/ㅔ→4, ㅗ→8, ㅜ→7, ㅡ/ㅣ→6, ㅁㅂㅍ→21.
+azure_vowels = {
+    "1": "a",  # æ ə ʌ   ㅓ lands here; open unrounded, as in the other tables
+    "2": "a",  # ɑ       ㅏ
+    "3": "o",  # ɔ       rounded; not seen for Korean in the probe
+    "4": "e",  # ɛ ʊ     ㅐ and ㅔ, both. The ʊ half never fires for ko-KR (ㅜ→7)
+    "5": "a",  # ɝ       r-coloured mid vowel; nearest open unrounded shape
+    "6": "i",  # j i ɪ   ㅣ, and ㅡ - Azure also treats ㅡ as unrounded, the same
+    #                    call the jamo and IPA tables make
+    "7": "u",  # w u     ㅜ
+    "8": "o",  # o       ㅗ
+    "9": "a",  # aʊ      diphthongs take their nucleus, as glides do elsewhere
+    "10": "o",  # ɔɪ
+    "11": "a",  # aɪ
+}
+
+# p b m.
+azure_closed = frozenset({"21"})
+
+azure_silence = frozenset({"0"})
+
+# The consonant IDs: no labial gesture of their own. 18 (f v) is labiodental,
+# a posture the cartoon mouth does not have, so it follows the vowel too. The
+# y-glide (6) before ㅛ/ㅕ shows up as a short "i" ahead of the nucleus; the
+# minimum-duration merge absorbs it when it is brief enough.
+azure_transparent = frozenset({"12", "13", "14", "15", "16", "17", "18", "19", "20"})
+
+azure_visemes = symbol_table(
+    vowels=azure_vowels,
+    closed=azure_closed,
+    silence=azure_silence,
+    transparent=azure_transparent,
 )
 
 

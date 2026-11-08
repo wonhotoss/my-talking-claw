@@ -52,7 +52,29 @@ def test_ipa_inventory_is_fully_covered() -> None:
     assert set(ipa_inventory) <= covered(viseme.korean_ipa)
 
 
-@pytest.mark.parametrize("table", [viseme.korean_jamo, viseme.korean_ipa])
+# Azure's inventory is closed and documented: IDs 0..21. Every one is classified
+# so a new voice cannot surface an ID the table has no opinion on.
+def test_azure_ids_are_fully_covered() -> None:
+    assert {str(viseme_id) for viseme_id in range(22)} == covered(viseme.azure_visemes)
+
+
+@pytest.mark.parametrize(
+    "viseme_id,expected",
+    [("2", "a"), ("1", "a"), ("4", "e"), ("8", "o"), ("7", "u"), ("6", "i")],
+)
+def test_azure_vowels_follow_the_measured_korean_mapping(viseme_id: str, expected: str) -> None:
+    # ㅏ→2, ㅓ→1, ㅐ/ㅔ→4, ㅗ→8, ㅜ→7, ㅡ/ㅣ→6 (day-11.md, Azure probe).
+    assert viseme.azure_vowels[viseme_id] == expected
+
+
+def test_azure_consonants_take_the_nearest_vowel_and_labials_close() -> None:
+    # 마 → 21 (m) then 2 (ㅏ); 나 → 19 (n) then 2.
+    assert viseme.resolve_visemes(["0", "21", "2", "19", "2", "0"], frozenset(), viseme.azure_visemes) == [
+        "x", "m", "a", "a", "a", "x",
+    ]
+
+
+@pytest.mark.parametrize("table", [viseme.korean_jamo, viseme.korean_ipa, viseme.azure_visemes])
 def test_tables_do_not_classify_a_symbol_twice(table: viseme.symbol_table) -> None:
     groups = [set(table.vowels), table.closed, table.silence, table.transparent]
 

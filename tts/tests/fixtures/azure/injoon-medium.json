@@ -1,0 +1,239 @@
+{
+  "voice": "ko-KR-InJoonNeural",
+  "label": "medium",
+  "text": "오늘 서울 날씨는 맑고 최고 기온은 18도예요.",
+  "chars": 26,
+  "round_trip_seconds": 0.21900000001187436,
+  "audio_seconds": 4.6875,
+  "sample_rate": 16000,
+  "visemes": [
+    {
+      "viseme_id": 0,
+      "offset_ms": 25.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 75.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 375.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 425.0
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 500.0
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 575.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 650.0
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 737.5
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 825.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 887.5
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 950.0
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 1000.0
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 1062.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 1137.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 1200.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 1250.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 1275.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 1337.5
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 1400.0
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 1462.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 1550.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 1625.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 1875.0
+    },
+    {
+      "viseme_id": 16,
+      "offset_ms": 1962.5
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 2050.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 2112.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 2187.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 2262.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 2350.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 2437.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 2512.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 2575.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 2612.5
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 2712.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 2800.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 2850.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 2900.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 2962.5
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 3012.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 3075.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 3125.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3237.5
+    },
+    {
+      "viseme_id": 4,
+      "offset_ms": 3325.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3412.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 3650.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 3887.0
+    }
+  ],
+  "word_boundaries": [
+    {
+      "text": "오늘",
+      "offset_ms": 50.0,
+      "duration_ms": 512.5
+    },
+    {
+      "text": "서울",
+      "offset_ms": 575.0,
+      "duration_ms": 300.0
+    },
+    {
+      "text": "날씨는",
+      "offset_ms": 887.5,
+      "duration_ms": 437.5
+    },
+    {
+      "text": "맑고",
+      "offset_ms": 1337.5,
+      "duration_ms": 525.0
+    },
+    {
+      "text": "최고",
+      "offset_ms": 1875.0,
+      "duration_ms": 375.0
+    },
+    {
+      "text": "기온은",
+      "offset_ms": 2262.5,
+      "duration_ms": 437.5
+    },
+    {
+      "text": "18도예요",
+      "offset_ms": 2712.5,
+      "duration_ms": 1175.0
+    },
+    {
+      "text": ".",
+      "offset_ms": 3950.0,
+      "duration_ms": 37.5
+    }
+  ],
+  "wav": "out\\tts-desktop\\ko-KR-InJoonNeural\\02-medium.wav",
+  "error": ""
+}

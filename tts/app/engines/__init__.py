@@ -2,11 +2,15 @@
 
 One image ships one engine - the dependency sets do not overlap (MeloTTS needs
 torch + mecab-ko + unidic, Piper needs onnxruntime) and putting both in one
-image would carry ~6GB of them. The adapters both import their model lazily, so
-this module resolves cleanly in either image and picks by environment.
+image would carry ~6GB of them. The adapters all import their model or SDK
+lazily, so this module resolves cleanly in any image and picks by environment.
 
     TTS_ENGINE=melotts   (default) app/engines/melo.py
     TTS_ENGINE=piper               app/engines/piper.py
+    TTS_ENGINE=azure               app/engines/azure.py   (cloud; needs AZURE_SPEECH_*)
+
+Switching is manual (env + restart). There is no runtime fallback between the
+cloud and the local engines by decision (뇌중심-로드맵.md "비용·전제").
 """
 
 import os
@@ -27,4 +31,9 @@ def engine_for_environment() -> speech.speech_engine:
 
         return piper_engine()
 
-    raise RuntimeError(f"unknown TTS_ENGINE {name!r}; expected 'melotts' or 'piper'")
+    if name == "azure":
+        from app.engines.azure import azure_engine
+
+        return azure_engine()
+
+    raise RuntimeError(f"unknown TTS_ENGINE {name!r}; expected 'melotts', 'piper' or 'azure'")

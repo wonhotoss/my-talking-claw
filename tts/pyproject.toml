@@ -18,6 +18,10 @@ dependencies = [
     # Windows - so it stays a locked dependency and the timeline tests can run
     # end to end on the dev box.
     "soundfile>=0.12",
+    # app/engines/azure.py. A plain wheel on Windows and on the RPi's aarch64
+    # Linux (verified 2026-11-08), and small, so unlike the local engines it is
+    # a locked dependency. Imported lazily; the Piper/Melo paths never load it.
+    "azure-cognitiveservices-speech>=1.40",
 ]
 
 [dependency-groups]

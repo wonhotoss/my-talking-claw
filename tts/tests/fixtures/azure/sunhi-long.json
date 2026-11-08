@@ -1,0 +1,634 @@
+{
+  "voice": "ko-KR-SunHiNeural",
+  "label": "long",
+  "text": "지금 바로 확인해 볼게요. 조금만 기다려 주시면 결과를 정리해서 말씀드릴게요. 다른 궁금한 것도 같이 물어보셔도 돼요.",
+  "chars": 66,
+  "round_trip_seconds": 0.2340000000258442,
+  "audio_seconds": 10.9375,
+  "sample_rate": 16000,
+  "visemes": [
+    {
+      "viseme_id": 0,
+      "offset_ms": 50.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 100.0
+    },
+    {
+      "viseme_id": 16,
+      "offset_ms": 162.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 225.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 275.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 325.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 425.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 625.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 700.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 812.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 875.0
+    },
+    {
+      "viseme_id": 12,
+      "offset_ms": 987.5
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 1075.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 1100.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 1125.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 1175.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 1237.5
+    },
+    {
+      "viseme_id": 12,
+      "offset_ms": 1275.0
+    },
+    {
+      "viseme_id": 4,
+      "offset_ms": 1300.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 1375.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 1425.0
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 1487.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 1562.5
+    },
+    {
+      "viseme_id": 4,
+      "offset_ms": 1650.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 1762.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 1887.5
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 2012.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 2775.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 2825.0
+    },
+    {
+      "viseme_id": 16,
+      "offset_ms": 2881.25
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 2937.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 3000.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3037.5
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 3087.5
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 3125.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 3162.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 3250.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 3325.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3387.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 3437.5
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 3462.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 3550.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3587.5
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 3618.75
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 3662.5
+    },
+    {
+      "viseme_id": 16,
+      "offset_ms": 3687.5
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 3712.5
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 3762.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3850.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 3900.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 3950.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 4000.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 4050.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 4150.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 4462.5
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 4493.75
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 4525.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 4600.0
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 4650.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 4687.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 4725.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 4762.5
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 4812.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 4862.5
+    },
+    {
+      "viseme_id": 16,
+      "offset_ms": 4893.75
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 4925.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 4987.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 5062.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 5100.0
+    },
+    {
+      "viseme_id": 12,
+      "offset_ms": 5162.5
+    },
+    {
+      "viseme_id": 4,
+      "offset_ms": 5200.0
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 5275.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 5350.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 5475.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 5550.0
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 5637.5
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 5687.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 5775.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 5812.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 5862.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 5912.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 5950.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 5987.5
+    },
+    {
+      "viseme_id": 14,
+      "offset_ms": 6037.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 6100.0
+    },
+    {
+      "viseme_id": 4,
+      "offset_ms": 6162.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 6250.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 6387.5
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 6525.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 7350.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 7400.0
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 7487.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 7575.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 7612.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 7675.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 7787.5
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 7862.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 7900.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 7950.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 8000.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 8050.0
+    },
+    {
+      "viseme_id": 12,
+      "offset_ms": 8087.5
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 8125.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 8175.0
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 8250.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 8300.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 8362.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 8412.5
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 8487.5
+    },
+    {
+      "viseme_id": 20,
+      "offset_ms": 8612.5
+    },
+    {
+      "viseme_id": 2,
+      "offset_ms": 8725.0
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 8787.5
+    },
+    {
+      "viseme_id": 16,
+      "offset_ms": 8856.25
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 8925.0
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 8987.5
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 9037.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 9100.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 9162.5
+    },
+    {
+      "viseme_id": 21,
+      "offset_ms": 9250.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 9300.0
+    },
+    {
+      "viseme_id": 15,
+      "offset_ms": 9375.0
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 9450.0
+    },
+    {
+      "viseme_id": 1,
+      "offset_ms": 9487.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 9525.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 9587.5
+    },
+    {
+      "viseme_id": 19,
+      "offset_ms": 9675.0
+    },
+    {
+      "viseme_id": 7,
+      "offset_ms": 9750.0
+    },
+    {
+      "viseme_id": 4,
+      "offset_ms": 9787.5
+    },
+    {
+      "viseme_id": 6,
+      "offset_ms": 9825.0
+    },
+    {
+      "viseme_id": 8,
+      "offset_ms": 9975.0
+    },
+    {
+      "viseme_id": 0,
+      "offset_ms": 10125.0
+    }
+  ],
+  "word_boundaries": [
+    {
+      "text": "지금",
+      "offset_ms": 50.0,
+      "duration_ms": 512.5
+    },
+    {
+      "text": "바로",
+      "offset_ms": 575.0,
+      "duration_ms": 350.0
+    },
+    {
+      "text": "확인해",
+      "offset_ms": 937.5,
+      "duration_ms": 375.0
+    },
+    {
+      "text": "볼게요",
+      "offset_ms": 1325.0,
+      "duration_ms": 637.5
+    },
+    {
+      "text": ".",
+      "offset_ms": 1975.0,
+      "duration_ms": 100.0
+    },
+    {
+      "text": "조금만",
+      "offset_ms": 2825.0,
+      "duration_ms": 487.5
+    },
+    {
+      "text": "기다려",
+      "offset_ms": 3325.0,
+      "duration_ms": 325.0
+    },
+    {
+      "text": "주시면",
+      "offset_ms": 3662.5,
+      "duration_ms": 475.0
+    },
+    {
+      "text": "결과를",
+      "offset_ms": 4150.0,
+      "duration_ms": 700.0
+    },
+    {
+      "text": "정리해서",
+      "offset_ms": 4862.5,
+      "duration_ms": 600.0
+    },
+    {
+      "text": "말씀드릴게요",
+      "offset_ms": 5475.0,
+      "duration_ms": 1050.0
+    },
+    {
+      "text": ".",
+      "offset_ms": 6537.5,
+      "duration_ms": 112.5
+    },
+    {
+      "text": "다른",
+      "offset_ms": 7400.0,
+      "duration_ms": 375.0
+    },
+    {
+      "text": "궁금한",
+      "offset_ms": 7787.5,
+      "duration_ms": 450.0
+    },
+    {
+      "text": "것도",
+      "offset_ms": 8250.0,
+      "duration_ms": 350.0
+    },
+    {
+      "text": "같이",
+      "offset_ms": 8612.5,
+      "duration_ms": 362.5
+    },
+    {
+      "text": "물어보셔도",
+      "offset_ms": 8987.5,
+      "duration_ms": 675.0
+    },
+    {
+      "text": "돼요",
+      "offset_ms": 9675.0,
+      "duration_ms": 450.0
+    },
+    {
+      "text": ".",
+      "offset_ms": 10137.5,
+      "duration_ms": 100.0
+    }
+  ],
+  "wav": "out\\tts-desktop\\ko-KR-SunHiNeural\\04-long.wav",
+  "error": ""
+}

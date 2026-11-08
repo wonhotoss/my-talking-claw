@@ -12,6 +12,9 @@
 #     input tiny hallucinates and then pays a 40-50s temperature-fallback tail; base beam 1 is
 #     accurate with no tail at RTF 0.65-0.74). WHISPER_MODEL=<local dir> / WHISPER_BEAM_SIZE override.
 #   - tts runs natively (no Docker on this RPi) with the env values from tts/docker-compose.yml `piper`.
+#     TTS_ENGINE=azure switches to Azure Speech (day-11 probe: first sentence 0.1-0.3s vs Piper 2.5-3s);
+#     the key comes from scripts/azure-probe/.env (gitignored, never inside the brain's home). Switching
+#     back is manual: TTS_ENGINE=piper and rerun - no runtime fallback by decision (뇌중심-로드맵.md).
 #   - agent-gateway runs the day-10 SDK brain with its home in ~/claw-home (AGENT_BRAIN=cli brings back
 #     the per-turn claude -p). The home's .claude/settings.json is the tool policy now.
 #   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
@@ -35,6 +38,16 @@ brain_home="${BRAIN_HOME:-$HOME/claw-home}"
 agent_brain="${AGENT_BRAIN:-sdk}"
 whisper_model="${WHISPER_MODEL:-base}"
 whisper_beam_size="${WHISPER_BEAM_SIZE:-1}"
+tts_engine="${TTS_ENGINE:-piper}"
+tts_voice="${AZURE_TTS_VOICE:-ko-KR-SunHiNeural}"
+# The Azure Speech key, exported so the tmux server (started below) hands it to every window.
+# One gitignored file serves the probes and the stack; the brain can Read its home but not this.
+azure_env="$repo/scripts/azure-probe/.env"
+if [ -f "$azure_env" ]; then
+  set -a
+  . "$azure_env"
+  set +a
+fi
 kiosk_profile="$HOME/.config/claw-kiosk"
 # role=viewer: the kiosk draws only; audio/ owns the microphone and the speaker.
 kiosk_url="${KIOSK_URL:-https://localhost:5173/#/face?role=viewer}"
@@ -86,7 +99,11 @@ fi
 
 mkdir -p "$audio_dump_dir"
 [ -f "$brain_home/CLAUDE.md" ] || { echo "missing brain home: copy brain-home.example to $brain_home and run claude there once (brain-home.example/README.md)"; exit 1; }
-[ -f "$repo/tts/voices/ko_KR-kss-medium-aligned.onnx" ] || { echo "missing patched piper voice: run the tts setup in HANDOFF.md §설치 순서 2"; exit 1; }
+case "$tts_engine" in
+  piper) [ -f "$repo/tts/voices/ko_KR-kss-medium-aligned.onnx" ] || { echo "missing patched piper voice: run the tts setup in HANDOFF.md §설치 순서 2"; exit 1; } ;;
+  azure) [ -n "${AZURE_SPEECH_KEY:-}" ] && [ -n "${AZURE_SPEECH_REGION:-}" ] || { echo "TTS_ENGINE=azure needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION (expected in $azure_env — scripts/azure-probe/README.md)"; exit 1; } ;;
+  *) echo "unknown TTS_ENGINE '$tts_engine' (piper|azure)"; exit 1 ;;
+esac
 [ -f "$whisper_model/model.bin" ] || [ "$whisper_model" = "${whisper_model#/}" ] || { echo "missing whisper model dir: $whisper_model (day-8.md \"whisper tiny 비교\" — curl -C - model.bin)"; exit 1; }
 
 # A fresh Chromium profile offers Google Translate over the face; neither --lang nor
@@ -98,8 +115,9 @@ fi
 
 tmux new-session -d -s "$session" -n tts -c "$repo/tts"
 tmux send-keys -t "$session:tts" \
-  "TTS_ENGINE=piper TTS_DEVICE=cpu TTS_SPEED=1.0 TTS_VISEME_MIN_SECONDS=0.02 TTS_ENVELOPE_HZ=50 \
+  "TTS_ENGINE=$tts_engine TTS_DEVICE=cpu TTS_SPEED=1.0 TTS_VISEME_MIN_SECONDS=0.02 TTS_ENVELOPE_HZ=50 \
 PIPER_MODEL=$repo/tts/voices/ko_KR-kss-medium-aligned.onnx PIPER_CONFIG=$repo/tts/voices/ko_KR-kss-medium.onnx.json \
+AZURE_TTS_VOICE=$tts_voice \
 uv run uvicorn app.server:app --host 127.0.0.1 --port 8201" C-m
 
 tmux new-window -t "$session" -n voice -c "$repo/voice"
@@ -135,5 +153,5 @@ tmux new-window -t "$session" -n shell -c "$repo"
 tmux send-keys -t "$session:shell" "sleep 8; $repo/scripts/rpi-up.sh health; hostname -I" C-m
 
 echo "started tmux session '$session' (windows: tts voice gateway backend frontend audio kiosk shell)"
-echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   brain=$agent_brain home=$brain_home   whisper=$whisper_model beam=$whisper_beam_size"
+echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   brain=$agent_brain home=$brain_home   whisper=$whisper_model beam=$whisper_beam_size   tts=$tts_engine${tts_engine:+ }$([ "$tts_engine" = azure ] && echo "voice=$tts_voice")"
 echo "attach: tmux attach -t $session     phone: https://$(hostname -I | awk '{print $1}'):5173"

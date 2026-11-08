@@ -110,14 +110,15 @@ STT 서비스를 다른 머신에서 돌리려면 프론트엔드 코드를 바�
 
 ### 음성(TTS) 서비스
 
-에이전트 응답을 음성으로 합성하는 **독립형 온디바이스 TTS 서비스**다. 폰 브라우저의 내장 음성에 의존하지 않고 우리가 목소리/품질을 제어한다. **엔진이 둘**이고 같은 `/synthesize` + `/speak` 계약을 말한다.
+에이전트 응답을 음성으로 합성하는 **독립형 TTS 서비스**다. 폰 브라우저의 내장 음성에 의존하지 않고 우리가 목소리/품질을 제어한다. **엔진이 셋**이고 같은 `/synthesize` + `/speak` 계약을 말한다.
 
 | 엔진 | `TTS_ENGINE` | 포트 | 이미지 | RTF(4코어) | RSS | 라이선스 |
 | --- | --- | --- | --- | --- | --- | --- |
 | MeloTTS-Korean | `melotts` (기본) | 8200 | 5.53GB | 0.98 | 2.4GB | MIT |
 | Piper `ko_KR-kss-medium` | `piper` | 8201 | 649MB | **0.057** | **252MB** | **CC BY-NC-SA 4.0** |
+| Azure Speech (ko-KR 신경망 음성) | `azure` | 8201 (RPi, Piper 자리에) | — (SDK 휠) | 왕복 **0.1~0.3s**/문장 | 수십 MB | 종량제(F0 월 50만 자 무료) |
 
-Piper가 **17~27배 빠르고 메모리는 1/10**이라 라즈베리파이에서 실시간이 된다. 대신 목소리가 하나뿐이고 비상업 라이선스이며, 영어 차용어 발음이 MeloTTS보다 약하다. 실측 근거와 기기별 투영은 [platform-notes.md](platform-notes.md)에 있다.
+Piper가 로컬 둘 중 **17~27배 빠르고 메모리는 1/10**이라 라즈베리파이에서 실시간이 된다. 대신 목소리가 하나뿐이고 비상업 라이선스이며, 영어 차용어 발음이 MeloTTS보다 약하다. Azure는 첫 문장까지 0.1~0.3s(Piper 2.5~3s)에 목소리를 고를 수 있고(SunHi·InJoon·Hyunsu…) RPi 열부하가 없지만 망과 키가 필요하다 — 실측은 [day-11.md](day-11.md) "Azure 음성 API 프로브", 결정은 [뇌중심-로드맵.md](뇌중심-로드맵.md). 로컬 엔진은 **수동 전환용**으로 남는다(env 바꾸고 재기동; 런타임 폴백 없음). 실측 근거와 기기별 투영은 [platform-notes.md](platform-notes.md)에 있다.
 
 **이미지를 하나로 합치지 않는 이유**: 두 엔진의 의존성이 겹치지 않는다(MeloTTS는 torch+mecab-ko+unidic, Piper는 onnxruntime). 합치면 ~6GB를 들고 다녀야 해서 **코드는 하나, 이미지는 둘**로 간다. `app/`은 완전히 공유되고 엔진 어댑터만 `app/engines/`에서 갈린다.
 
@@ -178,7 +179,7 @@ curl -s -X POST http://localhost:8200/speak -H "Content-Type: application/json" 
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `TTS_ENGINE` | `melotts` | `melotts` 또는 `piper`. 이미지가 각자 자기 값을 박아둔다. |
+| `TTS_ENGINE` | `melotts` | `melotts`, `piper`, `azure`. 이미지가 각자 자기 값을 박아둔다; RPi는 `rpi-up.sh`의 `TTS_ENGINE`(기본 piper). |
 | `TTS_DEVICE` | `cpu` | GPU 머신에서는 `cuda`. |
 | `TTS_SPEED` | `1.0` | 말하기 속도. |
 | `TTS_VISEME_MIN_SECONDS` | `0.04` (piper는 `0.02`) | 이보다 짧은 viseme 구간은 이웃에 흡수(깜빡임 방지). |
@@ -202,8 +203,22 @@ Piper 전용:
 | `PIPER_MODEL` | `/voices/ko_KR-kss-medium-aligned.onnx` | 정렬 출력이 패치된 음성 모델. |
 | `PIPER_CONFIG` | `/voices/ko_KR-kss-medium.onnx.json` | 모델 config(패치 전 파일 옆에 그대로 있다). |
 
+Azure 전용:
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AZURE_SPEECH_KEY` | (필수) | Speech 리소스 키. 집(`claw-home`)에 두지 않는다 — RPi는 `scripts/azure-probe/.env`(gitignore)를 `rpi-up.sh`가 읽는다. |
+| `AZURE_SPEECH_REGION` | (필수) | 예 `koreacentral`. |
+| `AZURE_TTS_VOICE` | `ko-KR-SunHiNeural` | 음성 이름. `ko-KR-InJoonNeural`, `ko-KR-HyunsuMultilingualNeural`도 실측됨. |
+
+출력은 `Raw16Khz16BitMonoPcm`으로 고정(기기 스피커가 16kHz라 리샘플 없음). `TTS_SPEED`는 SSML `prosody rate`로 전달된다. 한 요청 = 조각 하나라 `segments`는 문장 전체 하나다(백엔드가 이미 문장 단위로 `/speak`를 부른다).
+
 **엔진별 정렬(=viseme) 출처가 다르다.**
 
+- Azure는 음소가 아니라 **viseme ID(0~21)와 시작 오프셋**을 이벤트로 준다. 끝 = 다음 시작, 마지막 =
+  오디오 끝, 첫 이벤트 앞 공백 = 무음으로 바꿔 `pieces()` 계약의 `sample_counts`에 넣는다. 한국어
+  모음이 어느 ID에 떨어지는지는 실측 표(`viseme.azure_visemes`, day-11)이고 `tts/tests/fixtures/azure/`의
+  실제 이벤트 스트림으로 네트워크 없이 재생 테스트한다.
 - MeloTTS는 `SynthesizerTrn.infer`의 어텐션 출력이라는 **내부 구현**에 의존하므로 **커밋 SHA로
   고정**되어 있다(`Dockerfile.melo`의 `melotts_commit`). 올릴 때는 의도적으로 올리고 `tts/tests`
   + 실제 `/speak` 호출을 다시 확인한다.

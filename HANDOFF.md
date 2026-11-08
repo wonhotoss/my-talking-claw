@@ -32,7 +32,7 @@
 
 > **2026-11-08 방향 논의**: STT·TTS는 Azure Speech 종량제로, 뇌는 RPi에 남기고 뇌에게 기기(예약·외장기기·얼굴 카드)를 준다. 트랙·범위·의존성은 [뇌중심-로드맵.md](뇌중심-로드맵.md). 우선순위는 미정(사용자 재판단).
 >
-> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). 어댑터 설계 결정(루프가 STT를 쥐는 `transcriber` Protocol 심, `stream.close()`→세션 종료 대기, Azure viseme ID를 기호로 보고 `pieces()` 재사용, A-1 생략)은 day-11 "미룬 개선"에.
+> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). **트랙 B 구현 완료**(`TTS_ENGINE=azure`, day-11 "트랙 B 구현"): `rpi-up.sh`에 `TTS_ENGINE=azure`로 올리면 된다(기본은 아직 piper). 트랙 A(STT) 설계: 루프가 STT를 쥐는 `transcriber` Protocol 심 + voice 서비스도 같은 `STT_ENGINE`을 따라 폰이 함께 전환(PyAV→push stream), `stream.close()`→세션 종료 대기.
 
 ## 다음 할 일 (우선순위)
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.

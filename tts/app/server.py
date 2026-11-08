@@ -1,5 +1,7 @@
 import base64
 import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,9 +49,18 @@ class health_response(BaseModel):
     language: str
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # The cloud engine opens its connection here so the first turn after a
+    # restart is not the slow one. A bad key fails the start, loudly.
+    engine.warm_up()
+    yield
+
+
 app = FastAPI(
     title="My Talking Claw TTS",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
