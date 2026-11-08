@@ -80,7 +80,14 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 3000
 
 ### 음성(STT) 서비스
 
-녹음된 오디오를 텍스트로 변환하는 **독립형 온디바이스 STT 서비스**다. 에이전트 백엔드와 별개의 프로세스/포트라서 나중에 더 성능 좋은 다른 머신으로 옮길 수 있다. 첫 요청 시 Whisper 모델을 1회 내려받아 로드한다.
+녹음된 오디오를 텍스트로 변환하는 **독립형 STT 서비스**다. 에이전트 백엔드와 별개의 프로세스/포트라서 나중에 더 성능 좋은 다른 머신으로 옮길 수 있다. **폰 클라이언트의 STT 경로**이기도 하다(`/voice/transcribe` → 텍스트 → `/api/turns`). 엔진은 둘:
+
+| `STT_ENGINE` | 엔진 | 비고 |
+| --- | --- | --- |
+| `whisper` (기본) | faster-whisper, 이 호스트에서 | 첫 요청 시 모델 1회 다운로드·로드. RPi4 base beam 1로 1.6~2.5초 클립에 4.7~6.8 s(30초 창 고정 비용) |
+| `azure` | Azure Speech | 폰 blob(webm/opus·mp4)을 PyAV로 16 kHz PCM 디코드 → push stream → 연속 인식. 2.5 s 클립 1.4~2.9 s(day-11 프로브). whisper를 import하지 않으므로 모델 로드 0 |
+
+기기 루프(`audio/`)도 **같은 `STT_ENGINE`**을 읽는다 — `rpi-up.sh`가 둘에 같은 값을 넘기므로 폰과 기기가 함께 전환되고, 함께 되돌아간다. 전환은 수동(env + 재기동), 런타임 폴백 없음([뇌중심-로드맵.md](뇌중심-로드맵.md) "비용·전제").
 
 ```powershell
 cd voice
@@ -105,6 +112,16 @@ curl http://localhost:8100/health
 | `WHISPER_BEAM_SIZE` | `5` | faster-whisper 기본값. RPi4 운영은 `1`(day-9 결정 — `scripts/rpi-up.sh`가 넘긴다). 25~35% 빠르고 사람 발화 정확도 차이 없음. |
 
 `base`는 가볍고 CPU에서도 빠르다. 더 높은 정확도가 필요하면 `WHISPER_MODEL=large-v3`로 실행한다(최초 약 3GB 다운로드, CPU에서는 느림).
+
+Azure 전용(`STT_ENGINE=azure`):
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` | (필수) | TTS와 같은 리소스. RPi는 `scripts/azure-probe/.env`를 `rpi-up.sh`가 읽는다. |
+| `AZURE_STT_LANGUAGE` | `ko-KR` | 요청이 언어를 지정하지 않을 때. 요청의 `ko` 같은 짧은 코드는 `ko-KR`로 매핑된다(폰은 `ko`를 보낸다). |
+| `AZURE_STT_TIMEOUT_SECONDS` | `10` | 클립을 다 보낸 뒤 최종 텍스트를 기다리는 상한. |
+
+`/health`의 `model/device/compute_type`은 azure에서 `azure / <리전> / cloud`.
 
 STT 서비스를 다른 머신에서 돌리려면 프론트엔드 코드를 바꾸지 않고 `frontend/vite.config.ts`의 `/voice` proxy 타깃(운영에서는 리버스 프록시)만 그 머신 주소로 바꾼다.
 
@@ -337,10 +354,16 @@ RPi 키오스크용. **녹음도 재생도 하지 않고 그리기만 한다.** 
 등)가 되면 브라우저는 거기로 소리를 못 보낸다.
 
 ```
-ReSpeaker ──16k──► 캡처 → 웨이크워드(openWakeWord) → VAD 엔드포인팅 → POST /voice/transcribe → POST /api/turns
+ReSpeaker ──16k──► 캡처 → 웨이크워드(openWakeWord) → VAD 엔드포인팅 → transcriber → POST /api/turns
              ◄──── GET /api/events(SSE): utterance → POST /tts/speak → 리샘플·-12dB → PortAudio 재생
                     POST /api/device {device_state | speech_started{track} | speech_ended} (X-Push-Token)
 ```
+
+`transcriber`(`app/transcriber.py`)는 STT 교체 지점이다. 세션을 **웨이크워드 시점에 열고**, 녹음되는
+프레임을 매번 넘기고, 엔드포인트에서 끝낸다. `STT_ENGINE=whisper`는 끝난 클립을 `POST /voice/transcribe`로
+(day-9 경로), `STT_ENGINE=azure`는 말하는 동안 Azure로 스트리밍해 말 끝에 텍스트가 이미 와 있다
+(day-11 프로브: 마지막 프레임 뒤 −0.13~+0.24 s, whisper 6.8 s). 끝내기는 `stream.close()` → `EndOfStream`
+대기 — 닫자마자 `stop`을 부르면 결과가 유실된다(실측).
 
 ```bash
 cd audio
@@ -359,7 +382,9 @@ RPi엔 `libportaudio2`(apt)가 필요하다. 첫 실행에 openWakeWord 모델(~
 | `AUDIO_PLAYBACK_GAIN_DB` | `-12` | day-9 실측: 사용자가 "충분"하다고 한 음량이고, 마이크 포화(0dB에서 피크 -0.5 dBFS)를 벗어난다. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` / `WAKE_WORD_THRESHOLD_WHILE_SPEAKING` | `hey_jarvis,alexa,hey_mycroft` / `0.5` / `0.2` | **자리표시자**(쉼표로 여러 개, 아무거나 하나면 깨어남). 한국어 "누구야"는 기성 모델이 없다(day-9.md "열린 결정"). 한국어 화자의 "hey jarvis"는 점수가 0.0~0.65로 들쭉날쭉해서(day-9 실기) 발음하기 쉬운 "alexa"를 같이 올렸다. `app/wake_word.py`의 인터페이스 하나로 교체. |
 | `VAD_THRESHOLD` | `0.5` | silero(openWakeWord 동봉). |
-| `STT_LANGUAGE` | `ko` | |
+| `STT_ENGINE` | `whisper` | `whisper` 또는 `azure`. voice 서비스와 같은 값으로(`rpi-up.sh`가 맞춘다). |
+| `STT_LANGUAGE` | `ko` | whisper용 짧은 코드. |
+| `AZURE_STT_LANGUAGE` / `AZURE_STT_TIMEOUT_SECONDS` | `ko-KR` / `5` | azure용. 키·리전은 `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`. |
 | `ENDPOINT_TRAILING_SILENCE_MS` / `NO_SPEECH_TIMEOUT_MS` / `MAX_UTTERANCE_MS` / `MIN_SPEECH_MS` | `700` / `5000` / `15000` / `300` | 발화 끝 판정. `app/endpointer.py`. |
 | `AUDIO_WAKE_CHIME` | `true` | 웨이크워드 직후 알림음(무음 150ms + 880Hz 200ms, -12dB). 화면을 안 봐도 "듣고 있어요"를 알 수 있게. 앞의 무음은 USB DAC가 스트림 시작 직후 ~100ms를 삼키기 때문. |
 | `AUDIO_DIAGNOSTICS_SECONDS` | `5` | 이 주기로 마이크 피크 레벨·최고 웨이크 점수·드롭 프레임을 로그. 마이크가 죽은 건지 감지기가 못 듣는 건지 구분용. `0`이면 끔. |

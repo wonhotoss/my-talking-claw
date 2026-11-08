@@ -1,7 +1,18 @@
+"""The transcription contract and engine selection for the voice service.
+
+    STT_ENGINE=whisper  (default) app/engines/whisper.py - faster-whisper on this host
+    STT_ENGINE=azure              app/engines/azure.py   - Azure Speech (needs AZURE_SPEECH_*)
+
+The device loop (audio/) picks its engine with the same variable, so the phone
+- which transcribes through this service - and the device switch together and
+fall back together. Switching is manual: env + restart, no runtime fallback,
+by decision (뇌중심-로드맵.md "비용·전제"). Both engines import their model or
+SDK lazily, so this module loads on any host.
+"""
+
 import os
 from dataclasses import dataclass
-
-from faster_whisper import WhisperModel
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -11,57 +22,28 @@ class transcription_result:
     duration_seconds: float
 
 
-class stt_engine:
-    """On-device speech-to-text backed by faster-whisper.
+class stt_engine(Protocol):
+    # Reported by /health. Named after whisper's knobs; the cloud engine fills
+    # them with what it has (voice, region, "cloud") so the contract holds.
+    model_name: str
+    device: str
+    compute_type: str
+    default_language: str
 
-    Configuration comes from the environment so the service can be moved to a
-    more capable machine without code changes:
+    def transcribe(self, audio_path: str, language: str) -> transcription_result: ...
 
-    - WHISPER_MODEL         (default base; set medium/large-v3 for higher quality)
-    - WHISPER_DEVICE        (default cpu; cuda on a GPU machine)
-    - WHISPER_COMPUTE_TYPE  (default int8; float16 on cuda)
-    - WHISPER_LANGUAGE      (default ko; fallback when a request omits language)
-    - WHISPER_BEAM_SIZE     (default 5, faster-whisper's own; 1 is ~25-35% faster
-                             on RPi4 — day-8/day-9 measurements)
-    """
 
-    def __init__(self) -> None:
-        self.model_name = os.environ.get("WHISPER_MODEL", "base")
-        self.device = os.environ.get("WHISPER_DEVICE", "cpu")
-        self.compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
-        self.default_language = os.environ.get("WHISPER_LANGUAGE", "ko")
-        # VAD off by default: it tends to drop short/quiet utterances entirely,
-        # yielding empty transcriptions (the /transcribe 422). Enable with
-        # WHISPER_VAD=true if silence hallucinations become a problem.
-        self.vad_filter = os.environ.get("WHISPER_VAD", "false").lower() == "true"
-        self.beam_size = int(os.environ.get("WHISPER_BEAM_SIZE", "5"))
-        # Loading the model is expensive, so it is cached lazily on first use.
-        # This is the performance-critical exception to the no-cached-state rule.
-        self._model: WhisperModel | None = None
+def engine_for_environment() -> stt_engine:
+    name = os.environ.get("STT_ENGINE", "whisper")
 
-    @property
-    def model(self) -> WhisperModel:
-        if self._model is None:
-            self._model = WhisperModel(
-                self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-            )
+    if name == "whisper":
+        from app.engines.whisper import whisper_engine
 
-        return self._model
+        return whisper_engine()
 
-    def transcribe(self, audio_path: str, language: str) -> transcription_result:
-        segments, info = self.model.transcribe(
-            audio_path,
-            language=language,
-            vad_filter=self.vad_filter,
-            beam_size=self.beam_size,
-        )
+    if name == "azure":
+        from app.engines.azure import azure_engine
 
-        text = "".join(segment.text for segment in segments).strip()
+        return azure_engine()
 
-        return transcription_result(
-            text=text,
-            language=info.language,
-            duration_seconds=info.duration,
-        )
+    raise RuntimeError(f"unknown STT_ENGINE {name!r}; expected 'whisper' or 'azure'")

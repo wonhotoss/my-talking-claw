@@ -9,6 +9,9 @@ dependencies = [
     "openwakeword>=0.6.0",
     "onnxruntime>=1.17",
     "httpx>=0.28.0",
+    # app/transcriber.py azure_transcriber. Plain wheel on the RPi's aarch64
+    # (verified 2026-11-08); imported lazily, STT_ENGINE=whisper never loads it.
+    "azure-cognitiveservices-speech>=1.40",
 ]
 
 [dependency-groups]

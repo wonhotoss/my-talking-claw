@@ -15,6 +15,8 @@
 #     TTS_ENGINE=azure switches to Azure Speech (day-11 probe: first sentence 0.1-0.3s vs Piper 2.5-3s);
 #     the key comes from scripts/azure-probe/.env (gitignored, never inside the brain's home). Switching
 #     back is manual: TTS_ENGINE=piper and rerun - no runtime fallback by decision (뇌중심-로드맵.md).
+#   - STT_ENGINE=azure streams the utterance to Azure while the user talks (text ready at the endpoint,
+#     vs whisper's 6.8s) and goes to BOTH the audio loop and the voice service, so the phone follows.
 #   - agent-gateway runs the day-10 SDK brain with its home in ~/claw-home (AGENT_BRAIN=cli brings back
 #     the per-turn claude -p). The home's .claude/settings.json is the tool policy now.
 #   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
@@ -40,6 +42,7 @@ whisper_model="${WHISPER_MODEL:-base}"
 whisper_beam_size="${WHISPER_BEAM_SIZE:-1}"
 tts_engine="${TTS_ENGINE:-piper}"
 tts_voice="${AZURE_TTS_VOICE:-ko-KR-SunHiNeural}"
+stt_engine="${STT_ENGINE:-whisper}"
 # The Azure Speech key, exported so the tmux server (started below) hands it to every window.
 # One gitignored file serves the probes and the stack; the brain can Read its home but not this.
 azure_env="$repo/scripts/azure-probe/.env"
@@ -101,10 +104,17 @@ mkdir -p "$audio_dump_dir"
 [ -f "$brain_home/CLAUDE.md" ] || { echo "missing brain home: copy brain-home.example to $brain_home and run claude there once (brain-home.example/README.md)"; exit 1; }
 case "$tts_engine" in
   piper) [ -f "$repo/tts/voices/ko_KR-kss-medium-aligned.onnx" ] || { echo "missing patched piper voice: run the tts setup in HANDOFF.md §설치 순서 2"; exit 1; } ;;
-  azure) [ -n "${AZURE_SPEECH_KEY:-}" ] && [ -n "${AZURE_SPEECH_REGION:-}" ] || { echo "TTS_ENGINE=azure needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION (expected in $azure_env — scripts/azure-probe/README.md)"; exit 1; } ;;
+  azure) ;;
   *) echo "unknown TTS_ENGINE '$tts_engine' (piper|azure)"; exit 1 ;;
 esac
-[ -f "$whisper_model/model.bin" ] || [ "$whisper_model" = "${whisper_model#/}" ] || { echo "missing whisper model dir: $whisper_model (day-8.md \"whisper tiny 비교\" — curl -C - model.bin)"; exit 1; }
+case "$stt_engine" in
+  whisper) [ -f "$whisper_model/model.bin" ] || [ "$whisper_model" = "${whisper_model#/}" ] || { echo "missing whisper model dir: $whisper_model (day-8.md \"whisper tiny 비교\" — curl -C - model.bin)"; exit 1; } ;;
+  azure) ;;
+  *) echo "unknown STT_ENGINE '$stt_engine' (whisper|azure)"; exit 1 ;;
+esac
+if [ "$tts_engine" = azure ] || [ "$stt_engine" = azure ]; then
+  [ -n "${AZURE_SPEECH_KEY:-}" ] && [ -n "${AZURE_SPEECH_REGION:-}" ] || { echo "an azure engine needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION (expected in $azure_env — scripts/azure-probe/README.md)"; exit 1; }
+fi
 
 # A fresh Chromium profile offers Google Translate over the face; neither --lang nor
 # --disable-features=Translate suppresses it on this build, the profile preference does.
@@ -122,7 +132,7 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 8201" C-m
 
 tmux new-window -t "$session" -n voice -c "$repo/voice"
 tmux send-keys -t "$session:voice" \
-  "WHISPER_MODEL=$whisper_model WHISPER_BEAM_SIZE=$whisper_beam_size uv run uvicorn app.server:app --host 127.0.0.1 --port 8100" C-m
+  "STT_ENGINE=$stt_engine WHISPER_MODEL=$whisper_model WHISPER_BEAM_SIZE=$whisper_beam_size uv run uvicorn app.server:app --host 127.0.0.1 --port 8100" C-m
 
 tmux new-window -t "$session" -n gateway -c "$repo/agent-gateway"
 tmux send-keys -t "$session:gateway" \
@@ -139,7 +149,7 @@ tmux new-window -t "$session" -n frontend -c "$repo/frontend"
 tmux send-keys -t "$session:frontend" "npm run dev" C-m
 
 tmux new-window -t "$session" -n audio -c "$repo/audio"
-tmux send-keys -t "$session:audio"   "until curl -s -m 2 -o /dev/null http://127.0.0.1:8000/health && curl -s -m 2 -o /dev/null http://127.0.0.1:8201/health; do sleep 1; done; PUSH_TOKEN=$push_token AUDIO_INPUT_DEVICE=$audio_device AUDIO_OUTPUT_DEVICE=$audio_device AUDIO_DUMP_DIR=$audio_dump_dir AUDIO_PLAYBACK_GAIN_DB=$playback_gain_db WAKE_WORD_MODEL=$wake_word_model uv run python -m app.main" C-m
+tmux send-keys -t "$session:audio"   "until curl -s -m 2 -o /dev/null http://127.0.0.1:8000/health && curl -s -m 2 -o /dev/null http://127.0.0.1:8201/health; do sleep 1; done; PUSH_TOKEN=$push_token STT_ENGINE=$stt_engine AUDIO_INPUT_DEVICE=$audio_device AUDIO_OUTPUT_DEVICE=$audio_device AUDIO_DUMP_DIR=$audio_dump_dir AUDIO_PLAYBACK_GAIN_DB=$playback_gain_db WAKE_WORD_MODEL=$wake_word_model uv run python -m app.main" C-m
 
 screen_keep_on
 tmux new-window -t "$session" -n kiosk -c "$HOME"
@@ -153,5 +163,5 @@ tmux new-window -t "$session" -n shell -c "$repo"
 tmux send-keys -t "$session:shell" "sleep 8; $repo/scripts/rpi-up.sh health; hostname -I" C-m
 
 echo "started tmux session '$session' (windows: tts voice gateway backend frontend audio kiosk shell)"
-echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   brain=$agent_brain home=$brain_home   whisper=$whisper_model beam=$whisper_beam_size   tts=$tts_engine${tts_engine:+ }$([ "$tts_engine" = azure ] && echo "voice=$tts_voice")"
+echo "PUSH_TOKEN=$push_token   gateway=:$gateway_port   brain=$agent_brain home=$brain_home   stt=$stt_engine (whisper=$whisper_model beam=$whisper_beam_size)   tts=$tts_engine$([ "$tts_engine" = azure ] && echo " voice=$tts_voice")"
 echo "attach: tmux attach -t $session     phone: https://$(hostname -I | awk '{print $1}'):5173"

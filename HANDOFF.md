@@ -10,7 +10,7 @@
 - **RPi에서 `scripts/rpi-up.sh`로 전부 뜬다.** tmux `claw` 창 8개: tts voice gateway backend frontend **audio kiosk** shell. 바탕화면 아이콘 `my-talking-claw.desktop`. `up`이 화면 끄기(swayidle)를 멈추고 `down`이 되돌린다.
 - **오디오는 `audio/`(Python 상주 루프)가 소유한다** — 캡처→웨이크워드→VAD→`/voice/transcribe`→`/api/turns`, SSE `utterance`→`/tts/speak`→PortAudio(ReSpeaker, -12dB). 브라우저는 `#/face?role=viewer`로 **그리기만** 한다(backend 이벤트 `device_state`·`speech_started{track}`·`speech_ended`). 근거·범위: [day-9.md](day-9.md) "2단계 설계".
 - **웨이크워드는 자리표시자 3개 동시**: `hey jarvis` / `alexa` / `hey mycroft` (openWakeWord 기본 모델). 평소 자리에서 0.8~1.0으로 잡힌다. 한국어 "누구야"는 **미해결**(기성 모델 없음 — Porcupine 커스텀 또는 openWakeWord 학습).
-- **STT는 base beam 1** (day-9 결정, 후보 5개 비교표는 day-9.md "STT 모델 결정"). 녹음은 VAD 스팬으로 **잘라서** 보낸다(무음 폭주 86s→10s).
+- **STT는 `STT_ENGINE`으로 고른다**(day-11): `whisper`(base beam 1, day-9 결정, 후보 비교표는 day-9.md "STT 모델 결정"; 녹음을 VAD 스팬으로 **잘라서** 보낸다) 또는 `azure`(녹음 중 스트리밍, 말 끝에 텍스트가 와 있다). 기기 루프와 voice 서비스(폰)가 같은 값을 읽는다.
 - **AEC 없음.** ReSpeaker Lite USB 펌웨어 2.0.5의 AEC는 실측상 작동 안 함(재생 중 녹음을 STT가 그대로 받아씀). 사용자 결정: **추후 과제, 검증된 기기로 재시도.** 재생 중 웨이크워드(barge-in)는 임계 0.2로 best-effort — 실측 점수 0.24. 소프트웨어 AEC는 루프가 재생 PCM을 쥐고 있어 이제 가능(미착수).
 - **열은 해결됐다(day 11, 2026-11-08).** 30mm 팬 5V + 구리 방열판 장착 뒤 전체 스택 유휴 **37~40°C**, STT 4회 연속 최고 **52°C**, 스로틀 비트 없음(전: 72~74 / 84°C). 팬 소음은 마이크 RMS -43 dBFS, "알렉사" 7/7. 온도 연동 팬·아머 케이스 불필요. 수치: [day-11.md](day-11.md).
 - 테스트: backend 63 / agent-gateway 19 / voice 7 / tts 65 / **audio 30** / frontend `tsc` 통과.
@@ -32,7 +32,7 @@
 
 > **2026-11-08 방향 논의**: STT·TTS는 Azure Speech 종량제로, 뇌는 RPi에 남기고 뇌에게 기기(예약·외장기기·얼굴 카드)를 준다. 트랙·범위·의존성은 [뇌중심-로드맵.md](뇌중심-로드맵.md). 우선순위는 미정(사용자 재판단).
 >
-> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). **트랙 B 구현 완료**(`TTS_ENGINE=azure`, day-11 "트랙 B 구현"): `rpi-up.sh`에 `TTS_ENGINE=azure`로 올리면 된다(기본은 아직 piper). 트랙 A(STT) 설계: 루프가 STT를 쥐는 `transcriber` Protocol 심 + voice 서비스도 같은 `STT_ENGINE`을 따라 폰이 함께 전환(PyAV→push stream), `stream.close()`→세션 종료 대기.
+> **트랙 A·B 실측 완료**(2026-11-08 밤, [scripts/azure-probe/](scripts/azure-probe/README.md), 수치는 [day-11.md](day-11.md) "Azure 음성 API 프로브"): 스트리밍 STT **말 끝→텍스트 ≈ 0 s**(지금 6.8 s), TTS 첫 문장 **0.1~0.3 s**(지금 2.5~3 s), ko-KR viseme 매핑표 확보, SDK가 RPi에 그대로 설치됨. 리소스 Speech F0 `koreacentral`, 키는 `scripts/azure-probe/.env`(gitignore)와 RPi 같은 경로. RPi 2.4 GHz Wi-Fi가 지속 트래픽에서 무너져(손실 40%) **5 GHz로 전환했고**(`KT_GiGA_5G_hahahoho`, 2G autoconnect off) 재측정에서 RPi도 데스크탑과 같은 수치(TTS 42/42, 부하 중 손실 0%). **트랙 A·B 구현 완료**(day-11 "트랙 B 구현"·"트랙 A 구현"): `STT_ENGINE=azure TTS_ENGINE=azure scripts/rpi-up.sh`로 올린다(기본은 아직 whisper·piper — 실기 확인 뒤 기본값 전환 판단). STT는 루프가 쥐는 `transcriber` 심(웨이크워드에 열고 녹음 중 스트리밍), voice 서비스도 같은 env를 따라 폰이 함께 전환. 데스크탑 실측: 말 끝→텍스트 0.04 s, 첫 문장 TTS 0.17~0.31 s.
 
 ## 다음 할 일 (우선순위)
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.

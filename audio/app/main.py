@@ -15,7 +15,12 @@ Configuration (all optional; defaults are the single-RPi layout of rpi-up.sh):
   WAKE_WORD_THRESHOLD_WHILE_SPEAKING  0.2 (barge-in without AEC: day-9 live, the user over our TTS
                                       peaked at 0.24 while our TTS alone peaked at 0.00)
   VAD_THRESHOLD                       0.5
-  STT_LANGUAGE                        ko
+  STT_ENGINE                          whisper: the voice service on this host, whole clip after the
+                                      endpoint; azure: Azure Speech streamed while recording (day-11).
+                                      The voice service reads the same variable, so the phone follows.
+  STT_LANGUAGE                        ko (whisper's bare code, for STT_ENGINE=whisper)
+  AZURE_STT_LANGUAGE                  ko-KR (BCP-47, for STT_ENGINE=azure; with AZURE_SPEECH_KEY/REGION)
+  AZURE_STT_TIMEOUT_SECONDS           5: how long the endpoint waits for Azure's final text (probe: 0.1-0.5s)
   ENDPOINT_TRAILING_SILENCE_MS        700
   ENDPOINT_NO_SPEECH_TIMEOUT_MS       5000
   ENDPOINT_MAX_UTTERANCE_MS           15000
@@ -36,6 +41,7 @@ from app.device_client import device_client
 from app.endpointer import endpoint_limits
 from app.loop import audio_loop, log, loop_settings
 from app.player import portaudio_sink
+from app.transcriber import azure_transcriber, transcriber, whisper_transcriber
 from app.vad import silero_vad
 from app.wake_word import openwakeword_detector
 
@@ -57,11 +63,29 @@ def device_from_env(name: str) -> int | str | None:
     return int(value) if value.isdigit() else value
 
 
+def transcriber_from_environment(client: device_client) -> transcriber:
+    engine = env("STT_ENGINE", "whisper")
+
+    if engine == "whisper":
+        return whisper_transcriber(client, capture_rate, env("STT_LANGUAGE", "ko"))
+
+    if engine == "azure":
+        return azure_transcriber(
+            # Missing variables raise KeyError on their own; that is the message we want.
+            key=os.environ["AZURE_SPEECH_KEY"],
+            region=os.environ["AZURE_SPEECH_REGION"],
+            language=env("AZURE_STT_LANGUAGE", "ko-KR"),
+            sample_rate=capture_rate,
+            timeout_seconds=float(env("AZURE_STT_TIMEOUT_SECONDS", "5")),
+        )
+
+    raise RuntimeError(f"unknown STT_ENGINE {engine!r}; expected 'whisper' or 'azure'")
+
+
 def main() -> None:
     settings = loop_settings(
         sample_rate=capture_rate,
         frame_samples=capture_frame_samples,
-        language=env("STT_LANGUAGE", "ko"),
         playback_gain_db=float(env("AUDIO_PLAYBACK_GAIN_DB", "-12")),
         dump_dir=env("AUDIO_DUMP_DIR", "") or None,
         wake_chime=env("AUDIO_WAKE_CHIME", "true").lower() == "true",
@@ -76,15 +100,16 @@ def main() -> None:
         ),
     )
     vad_threshold = float(env("VAD_THRESHOLD", "0.5"))
+    client = device_client(
+        http=httpx.Client(),
+        backend_url=env("BACKEND_URL", "http://127.0.0.1:8000"),
+        voice_url=env("VOICE_URL", "http://127.0.0.1:8100"),
+        tts_url=env("TTS_URL", "http://127.0.0.1:8201"),
+        push_token=env("PUSH_TOKEN", ""),
+    )
 
     loop = audio_loop(
-        client=device_client(
-            http=httpx.Client(),
-            backend_url=env("BACKEND_URL", "http://127.0.0.1:8000"),
-            voice_url=env("VOICE_URL", "http://127.0.0.1:8100"),
-            tts_url=env("TTS_URL", "http://127.0.0.1:8201"),
-            push_token=env("PUSH_TOKEN", ""),
-        ),
+        client=client,
         source=microphone(device_from_env("AUDIO_INPUT_DEVICE"), capture_rate, capture_frame_samples),
         wake=openwakeword_detector(env("WAKE_WORD_MODEL", "hey_jarvis,alexa,hey_mycroft").split(",")),
         make_vad=lambda: silero_vad(vad_threshold),
@@ -93,13 +118,14 @@ def main() -> None:
             int(env("AUDIO_OUTPUT_RATE", "16000")),
             int(env("AUDIO_OUTPUT_CHANNELS", "2")),
         ),
+        stt=transcriber_from_environment(client),
         settings=settings,
     )
 
     # kill -USR1 <pid> prints every thread's stack to stderr: the cheap way to see
     # what a hot thread is doing.
     faulthandler.register(signal.SIGUSR1, all_threads=True)
-    log(f"ready: wake words {env('WAKE_WORD_MODEL', 'hey_jarvis,alexa,hey_mycroft')}, gain {settings.playback_gain_db}dB")
+    log(f"ready: wake words {env('WAKE_WORD_MODEL', 'hey_jarvis,alexa,hey_mycroft')}, gain {settings.playback_gain_db}dB, stt {env('STT_ENGINE', 'whisper')}")
     loop.run()
 
 

@@ -8,11 +8,11 @@ import numpy as np
 from app.device_client import no_speech_error, spoken_reply
 from app.endpointer import endpoint_limits
 from app.loop import audio_loop, loop_settings
+from app.transcriber import whisper_transcriber
 
 settings = loop_settings(
     sample_rate=16000,
     frame_samples=1280,
-    language="ko",
     playback_gain_db=-12.0,
     dump_dir=None,
     wake_chime=False,
@@ -119,12 +119,58 @@ def voiced(count: int) -> list[np.ndarray]:
     return [np.full(1280, 1000, dtype=np.int16) for _ in range(count)]
 
 
+class fake_session:
+    def __init__(self, owner: "fake_transcriber") -> None:
+        self.owner = owner
+        self.fed = 0
+        self.finished_with: np.ndarray | None = None
+        self.aborted = False
+
+    def feed(self, frame: np.ndarray) -> None:
+        self.fed += 1
+
+    def finish(self, recording: np.ndarray) -> str:
+        self.finished_with = recording
+
+        if isinstance(self.owner.outcome, Exception):
+            raise self.owner.outcome
+
+        return self.owner.outcome
+
+    def abort(self) -> None:
+        self.aborted = True
+
+
+class fake_transcriber:
+    """A streaming engine stand-in: records the session protocol as called."""
+
+    def __init__(self) -> None:
+        self.outcome: str | Exception = "안녕"
+        self.sessions: list[fake_session] = []
+
+    def start(self) -> fake_session:
+        session = fake_session(self)
+        self.sessions.append(session)
+
+        return session
+
+
 def make_loop(wake: fake_wake) -> tuple[audio_loop, fake_client, fake_sink]:
     client = fake_client()
     sink = fake_sink()
-    loop = audio_loop(client, fake_source(), wake, fake_vad, sink, settings)
+    # The whisper transcriber is the day-9 path: the finished clip to the
+    # voice service through the client, which is what these tests observe.
+    loop = audio_loop(client, fake_source(), wake, fake_vad, sink, whisper_transcriber(client, 16000, "ko"), settings)
 
     return loop, client, sink
+
+
+def make_streaming_loop(wake: fake_wake) -> tuple[audio_loop, fake_client, fake_transcriber]:
+    client = fake_client()
+    stt = fake_transcriber()
+    loop = audio_loop(client, fake_source(), wake, fake_vad, fake_sink(), stt, settings)
+
+    return loop, client, stt
 
 
 def test_wake_word_then_speech_then_silence_posts_a_turn() -> None:
@@ -165,6 +211,42 @@ def test_silence_after_the_wake_word_times_out_without_stt() -> None:
 
     assert client.calls == []
     assert [event["phase"] for event in client.published][-1] == "listening"
+
+
+def test_a_streaming_session_is_opened_at_the_wake_word_fed_every_frame_and_finished() -> None:
+    loop, client, stt = make_streaming_loop(fake_wake({3}))
+
+    loop.listen(iter(silent(3) + voiced(5) + silent(9)))
+
+    assert len(stt.sessions) == 1
+    session = stt.sessions[0]
+    # Every frame of the utterance went to the engine as it was recorded.
+    assert session.fed == 5 + 9
+    # The trimmed recording still arrives for the whole-clip engines.
+    assert session.finished_with is not None and len(session.finished_with) == 11200
+    assert not session.aborted
+    assert [call[0] for call in client.calls] == ["start_turn"]
+    assert client.calls[0][1] == "안녕"
+
+
+def test_no_speech_aborts_the_streaming_session_instead_of_finishing_it() -> None:
+    loop, client, stt = make_streaming_loop(fake_wake({1}))
+
+    loop.listen(iter(silent(1) + silent(63)))
+
+    assert [(session.aborted, session.finished_with) for session in stt.sessions] == [(True, None)]
+    assert client.calls == []
+
+
+def test_an_stt_failure_loses_the_turn_not_the_device() -> None:
+    loop, client, stt = make_streaming_loop(fake_wake({1}))
+    stt.outcome = RuntimeError("azure stt canceled: network")
+
+    loop.listen(iter(silent(1) + voiced(5) + silent(9)))
+
+    assert client.calls == []
+    assert loop.accepted_turn is None
+    assert [event["phase"] for event in client.published][-2:] == ["transcribing", "listening"]
 
 
 def test_wake_word_during_a_turn_cancels_it_and_clears_the_queue() -> None:
@@ -292,7 +374,9 @@ class scored_wake:
 
 def test_a_lower_bar_applies_while_the_device_is_speaking() -> None:
     client = fake_client()
-    loop = audio_loop(client, fake_source(), scored_wake([0.4, 0.4]), fake_vad, fake_sink(), settings)
+    loop = audio_loop(
+        client, fake_source(), scored_wake([0.4, 0.4]), fake_vad, fake_sink(), whisper_transcriber(client, 16000, "ko"), settings
+    )
 
     # Not speaking: 0.4 is below the 0.5 bar, nothing happens.
     loop.listen(iter(silent(1)))

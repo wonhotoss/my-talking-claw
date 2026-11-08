@@ -3,9 +3,13 @@
 Three threads, each a thin wrapper over a synchronous method so the behaviour
 is testable without audio hardware or a network:
 
-  listen()      capture -> wake word -> endpoint -> STT -> POST /api/turns
+  listen()      capture -> wake word -> endpoint -> transcriber -> POST /api/turns
   on_event()    SSE from the backend -> utterance queue / barge-in bookkeeping
   speak_next()  queue -> /tts/speak -> sink, bracketed by speech_started/ended
+
+STT goes through the `transcriber` seam (transcriber.py): a session is opened
+at the wake word, fed every recorded frame, and finished at the endpoint, so a
+streaming engine has the text ready when the user stops talking.
 
 "Newest intent wins", exactly as the browser enforced it: any turn other than
 the one we adopted clears the speaker, and our own turn is adopted before its
@@ -29,6 +33,7 @@ from app.device_client import device_client, no_speech_error, spoken_reply
 from app.endpointer import endpoint_limits, endpointer, voiced_span_ms
 from app.pcm import apply_gain, dbfs, resample, tone, wav_bytes
 from app.player import playback_sink
+from app.transcriber import transcriber, transcription_session
 from app.vad import voice_detector
 from app.wake_word import wake_word_detector
 
@@ -37,7 +42,6 @@ from app.wake_word import wake_word_detector
 class loop_settings:
     sample_rate: int
     frame_samples: int
-    language: str
     playback_gain_db: float
     limits: endpoint_limits
     # Where to keep each recorded utterance as a WAV, for tuning the endpointer
@@ -88,6 +92,7 @@ class audio_loop:
         wake: wake_word_detector,
         make_vad: Callable[[], voice_detector],
         sink: playback_sink,
+        stt: transcriber,
         settings: loop_settings,
     ) -> None:
         self.client = client
@@ -95,6 +100,7 @@ class audio_loop:
         self.wake = wake
         self.make_vad = make_vad
         self.sink = sink
+        self.stt = stt
         self.settings = settings
 
         self.lock = threading.Lock()
@@ -229,8 +235,13 @@ class audio_loop:
 
     # --- microphone side -------------------------------------------------
 
-    def record_utterance(self, frames: Iterator[np.ndarray]) -> tuple[str, np.ndarray]:
-        """The verdict and the recording trimmed to its voiced span."""
+    def record_utterance(
+        self, frames: Iterator[np.ndarray], session: transcription_session
+    ) -> tuple[str, np.ndarray]:
+        """The verdict and the recording trimmed to its voiced span.
+
+        Every frame also goes to the STT session as it arrives, so a
+        streaming engine works while the user is still talking."""
         vad = self.make_vad()
         points = endpointer(self.settings.limits)
         frame_ms = self.settings.frame_samples * 1000 // self.settings.sample_rate
@@ -239,6 +250,7 @@ class audio_loop:
 
         for frame in frames:
             recorded.append(frame)
+            session.feed(frame)
             points.feed(vad.feed(frame), frame_ms)
             verdict = points.verdict()
 
@@ -252,20 +264,22 @@ class audio_loop:
 
         return verdict, samples[start_ms * per_ms : end_ms * per_ms]
 
-    def run_turn(self, recorded: np.ndarray) -> None:
+    def run_turn(self, recorded: np.ndarray, session: transcription_session) -> None:
         self.set_phase("transcribing")
         started = time.time()
-        wav = wav_bytes(recorded, self.settings.sample_rate)
 
         if self.settings.dump_dir is not None:
             path = os.path.join(self.settings.dump_dir, time.strftime("utterance-%Y%m%d-%H%M%S.wav"))
             with open(path, "wb") as dump:
-                dump.write(wav)
+                dump.write(wav_bytes(recorded, self.settings.sample_rate))
 
         try:
-            text = self.client.transcribe(wav, self.settings.language)
+            text = session.finish(recorded)
         except no_speech_error:
             log(f"stt {time.time() - started:.2f}s: nothing recognised")
+            return
+        except Exception as error:  # noqa: BLE001 - an STT outage loses one turn, not the device
+            log(f"stt failed after {time.time() - started:.2f}s: {error}")
             return
 
         log(f"stt {time.time() - started:.2f}s: {text}")
@@ -335,14 +349,19 @@ class audio_loop:
             self.wake.reset()
             self.barge_in()
             self.set_phase("recording")
+            # Opened before the chime, so a cloud engine's connection comes up
+            # while the cue plays rather than while the user waits for text.
+            session = self.stt.start()
 
             if self.settings.wake_chime:
                 self.sink.play(chime(self.sink.sample_rate), threading.Event())
 
-            verdict, recorded = self.record_utterance(frames)
+            verdict, recorded = self.record_utterance(frames, session)
 
             if verdict in ("done", "too_long"):
-                self.run_turn(recorded)
+                self.run_turn(recorded, session)
+            else:
+                session.abort()
 
             # Frames that piled up while we were busy are stale by definition.
             self.source.flush()

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.stt import stt_engine
+from app.stt import engine_for_environment
 
 
 class health_response(BaseModel):
@@ -33,7 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = stt_engine()
+engine = engine_for_environment()
 
 
 @app.get("/health", response_model=health_response)
@@ -59,7 +59,7 @@ async def post_transcribe(
     # An absent or blank language field means "use the service default".
     resolved_language = language or engine.default_language
 
-    # faster-whisper decodes via PyAV, which needs a real seekable file for
+    # Both engines decode via PyAV, which needs a real seekable file for
     # container formats like mp4/m4a, so the upload is staged on disk.
     temp = tempfile.NamedTemporaryFile(delete=False)
     try:

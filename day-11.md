@@ -135,6 +135,17 @@ RPi에서도 데스크탑 수치가 나온다. 5 GHz 스캔은 첫 `nmcli dev wi
 - 테스트 95개(+30): 프로브 JSON 4개를 `tts/tests/fixtures/azure/`에 복사해 네트워크 없이 `build_speech`까지 재생. "네, 알겠어요"의 입모양 열 `e a e a i o`(요의 활음 i 포함)를 고정.
 - `rpi-up.sh`: `TTS_ENGINE`(기본 piper)·`AZURE_TTS_VOICE`(기본 SunHi), `scripts/azure-probe/.env`가 있으면 source. azure인데 키가 없으면 기동 거부.
 - 미룬 것: 단어 경계(`WordBoundary`)로 다문장 요청을 segments로 나누기 — 백엔드가 문장 단위로 부르므로 지금은 불필요. `TTS_VISEME_MIN_SECONDS` Azure 전용값 — 0.02로 실기 뒤 판단.
+
+## 트랙 A 구현 — `STT_ENGINE=azure`, 기기와 폰이 함께 (23:00~23:40)
+
+- **`audio/app/transcriber.py`**: `player.py`의 sink와 같은 Protocol 심. `start()`(웨이크워드 직후, 차임 전 — 연결이 차임 동안 열린다) → `feed(frame)`(녹음 프레임마다) → `finish(recording)`(엔드포인트; 없으면 `no_speech_error`) / `abort()`(no_speech). `whisper_transcriber`는 끝난 클립을 지금처럼 `/voice/transcribe`로, `azure_transcriber`는 push stream + 연속 인식, 끝내기는 **`stream.close()` → `EndOfStream` 대기 → 정리 stop**(프로브 교훈). `loop_settings.language`는 whisper 쪽으로 옮겨 제거.
+- 루프 정책: STT 실패(망·인증)는 `start_turn` 실패와 같이 **한 턴을 잃고 기기는 산다**(로그 `stt failed`). 전엔 whisper HTTP 오류가 루프를 죽일 수 있었다.
+- **`voice/` 서비스도 `STT_ENGINE`을 따른다**(사용자 결정: 폰이 함께 전환·폴백). `app/stt.py`는 계약+선택, `engines/whisper.py`(이동)·`engines/azure.py`(신설: **PyAV로 폰 blob(webm/opus·mp4)을 16 kHz PCM 디코드** → push stream → 연속 인식; `ko`→`ko-KR` 매핑). azure면 whisper를 import하지 않아 모델 로드 0 — "voice 창 생략"의 이유가 해소돼 창은 유지.
+- `azure_session`은 두 서비스에 **복사본 둘**(독립 uv 프로젝트). 세 번째가 생기면 패키지로.
+- 실측(데스크탑, 진짜 SDK): voice `/transcribe` WAV 1.86 s·webm 1.53 s(4.0 s 클립, 정확), audio `start` 0.16 s, 실시간 페이스로 먹인 뒤 **`finish` 꼬리 0.04 s**, partial 8개.
+- 테스트: audio 43(+13: 세션 프로토콜 호출 순서·abort·실패 격리, azure_session 콜백 구동), voice 18(+11: PyAV 디코드·리샘플 실제, 세션, 선택).
+- `rpi-up.sh`: `STT_ENGINE`(기본 whisper)을 voice·audio 창 둘 다에, azure 엔진이 하나라도 있으면 키 필수, whisper일 때만 모델 디렉터리 검사.
+- 미룬 것: partial 자막(`recognizing` → `device_state`), 세션당 recognizer 재생성 비용(start 0.16 s — 차임 0.35 s 안이라 지금은 무시), `~/claw-recordings` 덤프는 그대로(엔진 무관).
 - **마이크 포화** — 현재: 11-01 녹음이 −0 dBFS. 왜 안 했나: 11-08 녹음은 정상이라 이미 바뀐 조건일 수 있다(거리·게인). 착수 지점: `audio` 진단 로그의 `mic peak`가 −3 dBFS를 넘으면 경고 한 줄.
 - **STT NoMatch 처리** — 현재: 1.2초 클립 1건이 NoMatch. 착수 지점: 어댑터에서 NoMatch는 지금의 422(`no_speech_error`)와 같은 경로로.
 - **인증 오류를 그대로 읽는다** — 현재: 모델 텍스트 블록에 온 "Failed to authenticate…"가 `reply`로 나간다. 왜 안 했나: 이번에 처음 봤다. 착수 지점: `sdk_agent.py` `turn_translator`에서 `ResultMessage.is_error` 또는 해당 문구를 잡아 `error`로 바꾸고, 호스트가 집의 `host.json`에 둔 한국어 안내("관리자가 로그인해야 해요")를 말하게.
