@@ -30,6 +30,8 @@
 - **쿨러 주문됨**(30mm SZH-AT002 ×2 + 구리 방열판). 도착 전엔 RPi를 끄고 데스크탑+폰으로 진행(모니터 번인 우려 — 대책은 나중에).
 - 데스크탑 두뇌의 집: `D:\projects\claw-home`(신뢰 수락됨). 기동: `agent-gateway`에서 `AGENT_BRAIN=sdk BRAIN_HOME=D:\projects\claw-home AGENT_PAIRING_CODE=000000 DEVICE_PUSH_URL=http://127.0.0.1:8000/api/push DEVICE_PUSH_TOKEN=<백엔드 PUSH_TOKEN> uv run uvicorn app.server:app --port 3000`. **`CLAUDE_BIN`은 비운다**(npm 스텁 함정, README).
 
+> **2026-11-08 방향 논의**: STT·TTS는 Azure Speech 종량제로, 뇌는 RPi에 남기고 뇌에게 기기(예약·외장기기·얼굴 카드)를 준다. 트랙·범위·의존성은 [뇌중심-로드맵.md](뇌중심-로드맵.md). 우선순위는 미정(사용자 재판단).
+
 ## 다음 할 일 (우선순위)
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.
 2. ~~쿨링~~ — 끝(day-11). 시원한 기준선: **말 끝→첫 소리 ~14.5s**(day-9 20s; 줄어든 건 스폰 제거분). 남은 덩어리는 STT 6.8s(whisper 30초 창 고정 비용)와 첫 문장 TTS.
