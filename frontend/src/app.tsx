@@ -21,12 +21,22 @@ import { create_speech_queue } from "./speech_queue";
 import type { speech_phase, speech_queue } from "./speech_queue";
 import type { playback_position, speech_track } from "./speech_track";
 
-type layout_kind = "console" | "face";
+// Two independent questions, answered by the URL (얼굴-설계.md "라우트"):
+//   what is on screen - the console, or the face with a way back to it ("face",
+//     for development), or the face and nothing else ("kiosk", in operation:
+//     a button or label left lit all day is the one thing on screen that never
+//     moves, and nobody at the device needs the console);
+//   who owns audio - client_role below.
+//   #/              console, speaker        the phone
+//   #/face          face + console button, speaker   the phone, tap-to-talk
+//   #/face?role=viewer  face + console button, viewer  debugging the device's face
+//   #/kiosk         face only, viewer       the RPi display (rpi-up.sh)
+type layout_kind = "console" | "face" | "kiosk";
 
 // Day-9: who owns audio. "speaker" is the phone as before - it records, speaks,
-// and animates from its own <audio>. "viewer" is the RPi kiosk once the
+// and animates from its own <audio>. "viewer" is a face on the device once the
 // resident loop (audio/) owns the ReSpeaker: it neither records nor speaks, it
-// draws what the loop reports. #/face?role=viewer
+// draws what the loop reports. The kiosk is always a viewer.
 type client_role = "speaker" | "viewer";
 
 type timeline_kind = "user" | "agent" | "notice" | "system";
@@ -58,13 +68,16 @@ const blocked_label = "탭하면 들려드릴게요";
 const offline_label = "서버 연결 끊김";
 
 // offline_label sits below turn_label so a momentary reconnect does not nag in
-// the middle of a turn.
+// the middle of a turn. rest_label is what to show when nothing is happening:
+// the kiosk shows nothing there, and keeps every other line - listening,
+// thinking, offline - because those tell the person in the room something.
 function pick_status_label(
   permission: mic_permission,
   mic: mic_phase,
   speech: speech_phase,
   turn_label: string,
   stream: "connecting" | "open" | "closed",
+  rest_label: string,
 ): string {
   return permission === "denied"
     ? denied_label
@@ -82,7 +95,7 @@ function pick_status_label(
                 ? turn_label
                 : stream === "closed"
                   ? offline_label
-                  : waiting_label;
+                  : rest_label;
 }
 
 // The mic is only locked out while the recording is being transcribed. It stays
@@ -151,9 +164,9 @@ async function transcribe_audio(blob: Blob): Promise<string> {
   return data.text;
 }
 
-// The face view lives at #/face so a Raspberry Pi can boot Chromium straight
-// into it (chromium --kiosk https://.../#/face). The hash is subscribed to
-// rather than mirrored into state — the URL is already the source of truth.
+// The RPi boots Chromium straight into #/kiosk (rpi-up.sh). The hash is
+// subscribed to rather than mirrored into state — the URL is already the
+// source of truth.
 function subscribe_hash(on_change: () => void): () => void {
   window.addEventListener("hashchange", on_change);
 
@@ -164,10 +177,16 @@ function read_hash(): string {
   return window.location.hash;
 }
 
+function pick_layout(hash: string): layout_kind {
+  return hash.startsWith("#/kiosk") ? "kiosk" : hash.startsWith("#/face") ? "face" : "console";
+}
+
 function read_role(hash: string): client_role {
   const query = hash.split("?")[1] ?? "";
 
-  return new URLSearchParams(query).get("role") === "viewer" ? "viewer" : "speaker";
+  return pick_layout(hash) === "kiosk" || new URLSearchParams(query).get("role") === "viewer"
+    ? "viewer"
+    : "speaker";
 }
 
 // What the loop reported, mapped onto the speaker's own vocabulary so the mood
@@ -656,7 +675,7 @@ export function app_shell() {
 
   const hash = useSyncExternalStore(subscribe_hash, read_hash);
   const stream = useSyncExternalStore(subscribe_stream_status, read_stream_status);
-  const layout: layout_kind = hash.startsWith("#/face") ? "face" : "console";
+  const layout = pick_layout(hash);
   const viewer = read_role(hash) === "viewer";
   // A viewer shows the device's phases, not its own (it has none).
   const shown_permission: mic_permission = viewer ? "granted" : permission;
@@ -669,6 +688,7 @@ export function app_shell() {
     shown_speech,
     turn_label,
     stream,
+    layout === "kiosk" ? "" : waiting_label,
   );
 
   // The console body is wrapped in a single fragment so that both layouts
@@ -679,8 +699,8 @@ export function app_shell() {
   // silent TTS on iOS. Do not flatten this, and do not add a sibling here:
   // every new console element belongs inside the fragment.
   return (
-    <main className={layout === "face" ? "face_root" : "app_shell"}>
-      {layout === "face" ? (
+    <main className={layout === "console" ? "app_shell" : "face_root"}>
+      {layout !== "console" ? (
         createElement(face_view, {
           mood,
           status_label,
@@ -689,9 +709,12 @@ export function app_shell() {
           speech_pending: shown_speech !== "idle",
           // A viewer's tap does nothing: the loop's wake word is the trigger.
           on_tap: viewer ? () => undefined : () => void handle_mic_click(),
-          on_exit: () => {
-            window.location.hash = "";
-          },
+          on_exit:
+            layout === "face"
+              ? () => {
+                  window.location.hash = "";
+                }
+              : null,
         })
       ) : (
         <>

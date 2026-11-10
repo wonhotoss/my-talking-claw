@@ -303,22 +303,32 @@ $env:VITE_API_BASE_URL="https://<backend-origin>"
 npm run dev
 ```
 
-### 얼굴 화면 (`#/face`)
+### 얼굴 화면 (`#/face`, `#/kiosk`)
 
-에이전트가 말할 때 음성에 맞춰 입이 움직이는 풀스크린 얼굴이다. 상단바의 **얼굴** 버튼으로
-열거나 URL로 직접 들어간다.
+에이전트가 말할 때 음성에 맞춰 입이 움직이는 풀스크린 얼굴이다. 설계 전체(구조·상태·idle·성능
+계약·커스터마이즈)는 [얼굴-설계.md](얼굴-설계.md). 상단바의 **얼굴** 버튼으로 열거나 URL로 직접 들어간다.
+
+| URL | 화면 | 오디오 | 쓰는 곳 |
+| --- | --- | --- | --- |
+| `#/face` | 얼굴 + 콘솔 버튼 + 상태 문구 | 브라우저가 녹음·재생 | 폰 |
+| `#/face?role=viewer` | 같음 | 그리기만(기기 루프가 오디오) | 디버그 뷰어 |
+| `#/kiosk` | **얼굴과 필수 캡션만**("대기 중"·콘솔 버튼 없음) | 그리기만(항상 viewer) | **RPi 운용**(`rpi-up.sh`) |
 
 ```text
 https://<desktop-lan-ip>:5173/#/face
 ```
 
 해시 라우트인 이유는 최종 배포 형태가 **자체 모니터를 단 라즈베리 파이**라서다. 키오스크로
-바로 부팅할 수 있다.
+바로 부팅한다(`rpi-up.sh`가 이 줄에 Wayland·언어 플래그를 더해 띄운다).
 
 ```bash
 chromium --kiosk --ignore-certificate-errors \
-  --autoplay-policy=no-user-gesture-required https://<host>:5173/#/face
+  --autoplay-policy=no-user-gesture-required https://<host>:5173/#/kiosk
 ```
+
+얼굴은 쉴 때 **이벤트로만** 움직인다 — 깜빡임, 시선, 20~60초마다 자세 드리프트, 10분마다 자리
+이동(잔상 방지). 연속 애니메이션은 없다: RPi에서 연속 모션은 GPU 합성을 써도 코어의 40% 이상,
+이벤트 방식은 ~7%(day-12). 그래서 `--force-prefers-reduced-motion`은 더 이상 넘기지 않는다.
 
 `--autoplay-policy=no-user-gesture-required`는 **필수다.** day-7부터 에이전트가 요청 없이
 먼저 말할 수 있는데(예약 알림), 무인 부팅한 키오스크에는 자동재생을 허용해 줄 탭 제스처가
@@ -338,9 +348,9 @@ chromium --kiosk --ignore-certificate-errors \
 day-7부터 한 턴이 문장 여러 개로 나뉘어 도착하므로, 발화 사이에 `<audio>`의 소스를 바꾸는
 ~90ms 창이 생긴다(실측). 그 동안 자막이 상태 라벨로 번쩍이지 않도록 마지막 자막을 유지한다.
 
-#### 뷰어 역할 (`#/face?role=viewer`, day-9)
+#### 뷰어 역할 (`#/face?role=viewer`·`#/kiosk`, day-9)
 
-RPi 키오스크용. **녹음도 재생도 하지 않고 그리기만 한다.** 마이크와 스피커는 아래
+RPi 키오스크(`#/kiosk`는 항상 이 역할)와 디버그 뷰어용. **녹음도 재생도 하지 않고 그리기만 한다.** 마이크와 스피커는 아래
 [오디오 루프](#오디오-루프-audio-day-9)가 쥐고, 얼굴은 루프가 보내는 `device_state`로 표정·라벨을,
 `speech_started`의 viseme 트랙으로 입을 그린다. 트랙은 이벤트가 도착한 순간의 자기 시계에
 고정한다(같은 기기라 루프의 첫 샘플과 수 ms 차이). 탭은 아무것도 하지 않는다 — 트리거는

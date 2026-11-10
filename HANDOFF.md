@@ -8,7 +8,7 @@
 
 ## 지금 상태 (2026-11-01 기준, 확정된 것)
 - **RPi에서 `scripts/rpi-up.sh`로 전부 뜬다.** tmux `claw` 창 8개: tts voice gateway backend frontend **audio kiosk** shell. 바탕화면 아이콘 `my-talking-claw.desktop`. `up`이 화면 끄기(swayidle)를 멈추고 `down`이 되돌린다.
-- **오디오는 `audio/`(Python 상주 루프)가 소유한다** — 캡처→웨이크워드→VAD→`/voice/transcribe`→`/api/turns`, SSE `utterance`→`/tts/speak`→PortAudio(ReSpeaker, -12dB). 브라우저는 `#/face?role=viewer`로 **그리기만** 한다(backend 이벤트 `device_state`·`speech_started{track}`·`speech_ended`). 근거·범위: [day-9.md](day-9.md) "2단계 설계".
+- **오디오는 `audio/`(Python 상주 루프)가 소유한다** — 캡처→웨이크워드→VAD→`/voice/transcribe`→`/api/turns`, SSE `utterance`→`/tts/speak`→PortAudio(ReSpeaker, -12dB). 브라우저는 **`#/kiosk`**(얼굴과 필수 캡션만, 항상 viewer — 2026-11-11부터)로 **그리기만** 한다(backend 이벤트 `device_state`·`speech_started{track}`·`speech_ended`). 디버그 뷰어는 `#/face?role=viewer`. 근거·범위: [day-9.md](day-9.md) "2단계 설계", 얼굴 전체는 [얼굴-설계.md](얼굴-설계.md).
 - **웨이크워드는 자리표시자 3개 동시**: `hey jarvis` / `alexa` / `hey mycroft` (openWakeWord 기본 모델). 평소 자리에서 0.8~1.0으로 잡힌다. 한국어 "누구야"는 **미해결**(기성 모델 없음 — Porcupine 커스텀 또는 openWakeWord 학습).
 - **STT는 `STT_ENGINE`으로 고른다**(day-11): `whisper`(base beam 1, day-9 결정, 후보 비교표는 day-9.md "STT 모델 결정"; 녹음을 VAD 스팬으로 **잘라서** 보낸다) 또는 `azure`(녹음 중 스트리밍, 말 끝에 텍스트가 와 있다). 기기 루프와 voice 서비스(폰)가 같은 값을 읽는다.
 - **AEC 없음.** ReSpeaker Lite USB 펌웨어 2.0.5의 AEC는 실측상 작동 안 함(재생 중 녹음을 STT가 그대로 받아씀). 사용자 결정: **추후 과제, 검증된 기기로 재시도.** 재생 중 웨이크워드(barge-in)는 임계 0.2로 best-effort — 실측 점수 0.24. 소프트웨어 AEC는 루프가 재생 PCM을 쥐고 있어 이제 가능(미착수).
@@ -38,7 +38,7 @@
 1. ~~데스크탑 전체 스택 + 폰 실사용~~ — 끝(day-10.md). 체감 괜찮음, IP 읽기만 어색 → 규약으로 해결.
 2. ~~쿨링~~ — 끝(day-11). ~~STT 6.8s·첫 문장 TTS~~ — Azure로 끝(day-11 밤): **말 끝→첫 소리 ~3.3s**. 남은 덩어리는 두뇌 첫 델타 1.6~2.3s와 trailing silence 0.7s. 기본값 전환·게이트웨이 세션 워밍업은 day-11 미룬 개선.
 3. ~~RPi 두뇌 전환~~ — 끝. ~~문장 단위 선출력~~ — 끝.
-4. **모니터 번인 대책** — 스택이 떠 있는 동안 화면이 항상 켜져 있다(swayidle을 끈다). 얼굴이 정적이라 번인 위험. 후보: 대기 중 화면 끄기 + 웨이크워드·발화 때 `wlopm --on`, 또는 얼굴을 몇 분마다 조금씩 움직이기.
+4. ~~모니터 번인 대책~~ — **이벤트 idle 구현**(2026-11-11, [day-12.md](day-12.md) "구현"): 깜빡임·시선·20~60 s 드리프트·10 min 자리 이동, 쉴 때 루프가 잔다. `#/kiosk` Chromium **6.8%**(전 9.2% 정지 얼굴, 모션 켜면 48%). `--force-prefers-reduced-motion`은 뺐다. **RPi Chromium은 GPU(V3D, ANGLE/GLES)를 쓰고 있다** — day-9의 "GPU 합성 없음"은 틀린 추정. 남은 것: 밤 디밍·화면 끄기(시간대 모드), 가끔의 행동 — [얼굴-설계.md](얼굴-설계.md) 9절.
 5. **한국어 웨이크워드 "누구야"** — (A) Porcupine: 계정+AccessKey, 콘솔에서 몇 분, 바이너리 비공개. (B) openWakeWord 커스텀: Piper ko로 합성 데이터, GPU 1~2h. `audio/app/wake_word.py` 인터페이스 하나 교체.
 6. ~~Chromium 유휴 CPU~~ — `--force-prefers-reduced-motion`으로 44%→7~16% (day-9 쿨링 절). `face_view.tsx` `idle_frame_interval_ms` 또는 유휴 시 정지. STT에 2.3s를 더한다(day-9 측정).
 7. ~~STT "측정"→"제조/특정" 오인식~~ — Azure가 1건 교정, 1건은 Azure도 "제조"(day-11 프로브). 11-01 녹음은 마이크 포화(−0 dBFS)였다. 트랙 A로 흡수.
@@ -81,7 +81,9 @@
 | [day-8.md](day-8.md) | 서버 스택을 RPi로. 실측·열·tiny 비교 |
 | [day-9.md](day-9.md) | ReSpeaker 실측(AEC 안 됨), STT 모델 결정, 키오스크, **네이티브 오디오 루프 설계·구현·실기 6회** |
 | [day-10.md](day-10.md) | 두뇌 계층: 뇌의 집(관리자 설정) + Agent SDK 상주 세션, 스케줄, 문장 단위 선출력 |
-| [day-11.md](day-11.md) | 쿨러 장착 Q&A와 실측(온도·팬 소음·웨이크워드), 로그인 만료 |
+| [day-11.md](day-11.md) | 쿨러 장착 Q&A와 실측(온도·팬 소음·웨이크워드), 로그인 만료, Azure STT·TTS 전환과 실기(~3.3 s) |
+| [day-12.md](day-12.md) | 얼굴 idle 비용 실측(GPU 확인, 기법별·dev/빌드·브랜치), 이벤트 idle 설계·구현, `#/kiosk` 운용 모드, 이미지 파츠 규격 |
+| [얼굴-설계.md](얼굴-설계.md) | **얼굴 설계**: 라우트×역할, SVG 구조와 소유 규칙, mood 5종, 립싱크·자막, 이벤트 idle, 성능 계약, 직접 그린 파츠로 갈 때 |
 | [README.md](README.md) | 각 서비스 실행법·env 표·이벤트 계약(day-9 이벤트 3종, `audio/` 절 포함)·검증. **명령은 여기가 원본** |
 | [agent-latency-notes.md](agent-latency-notes.md) | 에이전트 홉 분해·기각된 가설·지연 조사 런북 |
 | [platform-notes.md](platform-notes.md) | RPi4 vs IdeaPad, Piper 실측, RPi 투영·빌드 블로커 |

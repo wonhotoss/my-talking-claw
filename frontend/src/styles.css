@@ -518,30 +518,33 @@ h1 {
   }
 }
 
-/* Breathing is a composited transform on the <svg> itself, so it costs no
-   raster work. Doing it as a per-frame SVG attribute write would force the
-   whole face to re-rasterise every frame — the worst thing you can do on a Pi. */
-@keyframes face_breathe {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-  50% {
-    transform: translateY(-6px) scale(1.006);
-  }
-}
+/* No continuous ambient motion. Day-12 on the RPi: a breathing animation here,
+   composited and GPU-rasterised, still cost 40% of a core all day - every
+   frame Chromium produces is the cost, not how it is drawn. The face moves in
+   events instead (blinks, glances in the loop; drift below), which costs what
+   a still face does. See 얼굴-설계.md "idle".
 
+   Drift is a transition on the <svg>, written by face_view every 20-60 s, so
+   the compositor draws the in-between frames. The pivot sits low, roughly
+   where a neck would be. The duration is set per move (longer for the
+   ten-minute relocation). */
 .face_svg {
-  animation: face_breathe 4.2s ease-in-out infinite;
+  transform-origin: 50% 72%;
+  transition-property: transform;
+  transition-timing-function: ease-in-out;
+  will-change: transform;
 }
 
 /* Lip-sync itself stays on: it is functional (it says the device is talking),
    not decoration. Only the ambient motion is suppressed. */
 @media (prefers-reduced-motion: reduce) {
   .mic_button.recording,
-  .face_svg,
   .face_listening .face_ring {
     animation: none;
+  }
+
+  .face_svg {
+    transition: none;
   }
 
   .face_brows,

@@ -4,13 +4,18 @@
 //
 // Rendering contract, and the whole reason this is fast enough for a Pi:
 //   1. the rAF loop never calls a state setter; it only writes attributes on
-//      four cached nodes;
+//      a few cached nodes;
 //   2. every JSX attribute on a JS-driven node is a module constant, so React
 //      writes it once at mount and can never clobber the loop mid-syllable
 //      (app_shell re-renders several times per turn via log_system);
-//   3. an unchanged attribute is not written at all, so a resting face costs
-//      zero raster work;
-//   4. CSS owns everything else that moves, on composited properties only.
+//   3. an unchanged attribute is not written at all;
+//   4. at rest the loop does not run at all. Day-12 measured on the RPi that
+//      the cost is frames, not technique: anything that moves continuously
+//      (CSS breathing, a 60 Hz rAF loop with nothing to draw) costs 40-54% /
+//      ~7% of a core, while the same face moving only in events - a blink, a
+//      glance, a slow drift - costs what a still face does (~10%). So while
+//      idle the loop runs until everything has settled, then sleeps on a
+//      timer until the next blink or glance (얼굴-설계.md "idle").
 // This is the "performance-critical" exception to the declarative rule in
 // AGENTS.md, in the same spirit as the lazy model caches in the Python services.
 
@@ -41,7 +46,7 @@ import type { playback_clock, speech_segment, speech_track } from "./speech_trac
 export type face_view_props = {
   mood: face_mood;
   // What the system is doing right now, shown in the caption area while the
-  // face is not speaking.
+  // face is not speaking. Empty shows nothing (the kiosk at rest).
   status_label: string;
   read_playback: playback_clock;
   speech_track_ref: RefObject<speech_track | null>;
@@ -51,7 +56,8 @@ export type face_view_props = {
   // sentences.
   speech_pending: boolean;
   on_tap: () => void;
-  on_exit: () => void;
+  // null in the kiosk: there is nowhere to go back to, so no button is drawn.
+  on_exit: (() => void) | null;
 };
 
 // Output buffering means the audible position lags audio.currentTime, so the
@@ -66,19 +72,84 @@ const idle_frame_interval_ms = 33;
 const eye_ry_open = 27;
 const eye_ry_closed = 2.5;
 const blink_ms = 130;
+// A slow, contented blink, now and then while idle.
+const slow_blink_ms = 420;
 const double_blink_gap_ms = 190;
+
+// Gaze, in viewBox units. The eyes take the whole offset and the brows a
+// fraction of it, which reads as a slight turn of the head rather than as
+// eyeballs sliding inside a fixed face.
+const glance_reach_x = 11;
+const glance_reach_y = 6;
+const brow_gaze_follow = 0.4;
+// A saccade: quick to move, then perfectly still until the next glance, so a
+// resting gaze writes nothing.
+const tau_gaze = 0.05;
+
+// Drift: the whole face eases to a slightly different pose every so often,
+// and every ten minutes to a different spot on the screen. This is the
+// burn-in guard - no high-contrast stroke stays on the same pixels for long -
+// and, at a few px and a degree, it also reads as the face shifting its
+// weight. Percent of the face box (800x480 on the kiosk: 1% = 8 px across).
+const drift_gap_min_ms = 20_000;
+const drift_gap_spread_ms = 40_000;
+const drift_reach_x = 1.2;
+const drift_reach_y = 1.0;
+const drift_reach_degrees = 1.2;
+const drift_seconds = 1.6;
+const relocate_gap_ms = 10 * 60_000;
+// The 800x480 kiosk has 160 px free on either side of the 480 px face, and
+// ~26 px above and below the ring.
+const relocate_reach_x = 6;
+const relocate_reach_y = 1.5;
+const relocate_seconds = 4;
+
+// Settled means no attribute moved this frame and the mouth spring is at rest.
+const resting_velocity = 0.5;
+const gaze_settled = 0.05;
+// Timers fire a little early now and then; wake just after the event is due.
+const wake_margin_ms = 5;
 
 const rest_mouth_d = mouth_path(mood_shapes.idle);
 const rest_brow_transform = "translate(0 0)";
-// Evaluated once: the effect below is rebuilt several times per turn, and a
-// kiosk's reduced-motion setting does not change under it.
+const rest_gaze_transform = "translate(0 0)";
+// Evaluated once: the effect below is rebuilt several times per turn, and the
+// setting does not change under it. Reduced motion keeps lip-sync (it says the
+// device is talking) and drops every ambient motion: blinks, glances, drift.
 const reduced_motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+type gaze_point = { x: number; y: number };
+
+// Where the eyes settle when nobody is making them wander: up and aside while
+// thinking, straight ahead otherwise - attentive while listening or talking.
+function rest_gaze(mood: face_mood): gaze_point {
+  return mood === "thinking" ? { x: 9, y: -7 } : { x: 0, y: 0 };
+}
+
+// Idle glances drift around and come back to centre about a third of the time,
+// so the face keeps returning to look at the room.
+function pick_glance(): gaze_point {
+  return Math.random() < 0.35
+    ? { x: 0, y: 0 }
+    : {
+        x: (Math.random() * 2 - 1) * glance_reach_x,
+        y: (Math.random() * 2 - 1) * glance_reach_y,
+      };
+}
+
+function next_glance_gap_ms(): number {
+  return 1800 + Math.random() * 4200;
+}
 
 function next_blink_gap_ms(mood: face_mood): number {
   const base = 2200 + Math.random() * 3600;
   const scale = mood === "listening" ? 1.6 : mood === "thinking" ? 0.8 : 1.0;
 
   return base * scale;
+}
+
+function spread(reach: number): number {
+  return (Math.random() * 2 - 1) * reach;
 }
 
 // Visemes carry the shape, the envelope carries the amplitude. Together they
@@ -126,9 +197,11 @@ function flap_shape(level: number, time: number): mouth_shape {
 }
 
 export function face_view(props: face_view_props) {
+  const svg_ref = useRef<SVGSVGElement | null>(null);
   const mouth_ref = useRef<SVGPathElement | null>(null);
   const eye_left_ref = useRef<SVGEllipseElement | null>(null);
   const eye_right_ref = useRef<SVGEllipseElement | null>(null);
+  const gaze_ref = useRef<SVGGElement | null>(null);
   const brow_motion_ref = useRef<SVGGElement | null>(null);
 
   const open_ref = useRef<spring_state>({ value: mood_shapes.idle.open, velocity: 0 });
@@ -143,12 +216,22 @@ export function face_view(props: face_view_props) {
   // Absolute performance.now() timestamps, held in a ref so the blink schedule
   // survives the effect rebuild on every mood change - otherwise a busy turn
   // would keep restarting the timer and the face would never blink.
-  const blink_ref = useRef({ next_ms: 0, start_ms: -1, doubled: false });
+  const blink_ref = useRef({
+    next_ms: 0,
+    start_ms: -1,
+    duration_ms: blink_ms,
+    doubled: false,
+  });
+  // Current position and target in refs for the same reason. The glance
+  // schedule is restarted on every rebuild instead: a mood change is a natural
+  // moment to refocus.
+  const gaze_state_ref = useRef({ x: 0, y: 0, target: rest_gaze("idle"), next_ms: 0 });
   const last_track_ref = useRef<speech_track | null>(null);
   // Derived from the track once, when the track changes - not every frame.
   const lines_ref = useRef<speech_segment[]>([]);
   const last_mouth_d_ref = useRef(rest_mouth_d);
   const last_eye_ry_ref = useRef(eye_ry_open.toFixed(1));
+  const last_gaze_ref = useRef(rest_gaze_transform);
   const last_brow_ref = useRef(rest_brow_transform);
   const last_clip_ref = useRef("");
 
@@ -164,36 +247,71 @@ export function face_view(props: face_view_props) {
     const mouth = mouth_ref.current;
     const eye_left = eye_left_ref.current;
     const eye_right = eye_right_ref.current;
+    const gaze_node = gaze_ref.current;
     const brow_motion = brow_motion_ref.current;
 
     if (
       mouth === null ||
       eye_left === null ||
       eye_right === null ||
+      gaze_node === null ||
       brow_motion === null
     ) {
       throw new Error("face nodes were not mounted");
     }
 
+    // Anything but rest keeps the loop running: listening, thinking and
+    // talking are short and interactive, and speech starts or ends only through
+    // a mood or speech_pending change, which rebuilds this effect. So sleeping
+    // is only ever needed - and only ever safe - at rest.
+    const busy = props.mood !== "idle" || props.speech_pending;
+
     let frame = 0;
+    let wake_timer = 0;
+    let asleep = false;
     let last_ms = performance.now();
 
     if (blink_ref.current.next_ms === 0) {
       blink_ref.current.next_ms = last_ms + next_blink_gap_ms(props.mood);
     }
 
-    const step = (now_ms: number) => {
-      frame = window.requestAnimationFrame(step);
+    gaze_state_ref.current.target = rest_gaze(props.mood);
+    gaze_state_ref.current.next_ms = last_ms + next_glance_gap_ms();
 
+    const wake = () => {
+      if (!asleep) {
+        return;
+      }
+
+      asleep = false;
+      last_ms = performance.now();
+      frame = window.requestAnimationFrame(step);
+    };
+
+    // Reduced motion has no next event: it sleeps until the effect is rebuilt.
+    const sleep = () => {
+      asleep = true;
+
+      if (reduced_motion) {
+        return;
+      }
+
+      const due_ms = Math.min(blink_ref.current.next_ms, gaze_state_ref.current.next_ms);
+      wake_timer = window.setTimeout(wake, Math.max(due_ms - performance.now(), 0) + wake_margin_ms);
+    };
+
+    const step = (now_ms: number) => {
       const track = props.speech_track_ref.current;
       const { playing, time: current_time } = props.read_playback();
 
       if (!playing && now_ms - last_ms < idle_frame_interval_ms) {
+        frame = window.requestAnimationFrame(step);
         return;
       }
 
       const delta = Math.min((now_ms - last_ms) / 1000, 0.05);
       last_ms = now_ms;
+      let wrote = false;
 
       if (track !== last_track_ref.current) {
         last_track_ref.current = track;
@@ -243,6 +361,7 @@ export function face_view(props: face_view_props) {
       if (next_mouth_d !== last_mouth_d_ref.current) {
         mouth.setAttribute("d", next_mouth_d);
         last_mouth_d_ref.current = next_mouth_d;
+        wrote = true;
       }
 
       const lines = lines_ref.current;
@@ -288,59 +407,147 @@ export function face_view(props: face_view_props) {
         set_subtitle(next_subtitle);
       }
 
-      if (reduced_motion) {
+      const blink = blink_ref.current;
+      const gaze = gaze_state_ref.current;
+
+      if (!reduced_motion) {
+        if (blink.start_ms < 0 && now_ms >= blink.next_ms) {
+          blink.start_ms = now_ms;
+          // The second half of a double blink is always a quick one.
+          blink.duration_ms =
+            props.mood === "idle" && !blink.doubled && Math.random() < 0.2
+              ? slow_blink_ms
+              : blink_ms;
+        }
+
+        const blink_elapsed =
+          blink.start_ms < 0 ? blink.duration_ms : now_ms - blink.start_ms;
+
+        if (blink.start_ms >= 0 && blink_elapsed >= blink.duration_ms) {
+          // A doubled blink never chains into a third, and a slow one is never
+          // doubled - the pair would read as a twitch after a sigh.
+          blink.doubled =
+            !blink.doubled && blink.duration_ms === blink_ms && Math.random() < 0.15;
+          blink.next_ms =
+            now_ms +
+            (blink.doubled ? double_blink_gap_ms : next_blink_gap_ms(props.mood));
+          blink.start_ms = -1;
+        }
+
+        const openness =
+          blink_elapsed >= blink.duration_ms
+            ? 1
+            : 1 - Math.sin(Math.PI * (blink_elapsed / blink.duration_ms));
+        const eye_ry = (
+          eye_ry_closed +
+          (eye_ry_open - eye_ry_closed) * openness
+        ).toFixed(1);
+
+        if (eye_ry !== last_eye_ry_ref.current) {
+          eye_left.setAttribute("ry", eye_ry);
+          eye_right.setAttribute("ry", eye_ry);
+          last_eye_ry_ref.current = eye_ry;
+          wrote = true;
+        }
+
+        if (props.mood === "idle" && now_ms >= gaze.next_ms) {
+          gaze.target = pick_glance();
+          gaze.next_ms = now_ms + next_glance_gap_ms();
+        }
+
+        gaze.x = exp_approach(gaze.x, gaze.target.x, tau_gaze, delta);
+        gaze.y = exp_approach(gaze.y, gaze.target.y, tau_gaze, delta);
+
+        const next_gaze = `translate(${gaze.x.toFixed(1)} ${gaze.y.toFixed(1)})`;
+
+        if (next_gaze !== last_gaze_ref.current) {
+          gaze_node.setAttribute("transform", next_gaze);
+          last_gaze_ref.current = next_gaze;
+          wrote = true;
+        }
+
+        const next_brow = `translate(${(gaze.x * brow_gaze_follow).toFixed(1)} ${(
+          -5 * level +
+          gaze.y * brow_gaze_follow
+        ).toFixed(1)})`;
+
+        if (next_brow !== last_brow_ref.current) {
+          brow_motion.setAttribute("transform", next_brow);
+          last_brow_ref.current = next_brow;
+          wrote = true;
+        }
+      }
+
+      const settled =
+        !busy &&
+        !playing &&
+        !wrote &&
+        blink.start_ms < 0 &&
+        Math.abs(open_ref.current.velocity) < resting_velocity &&
+        (reduced_motion ||
+          (Math.abs(gaze.x - gaze.target.x) < gaze_settled &&
+            Math.abs(gaze.y - gaze.target.y) < gaze_settled));
+
+      if (settled) {
+        sleep();
         return;
       }
 
-      const blink = blink_ref.current;
-
-      if (blink.start_ms < 0 && now_ms >= blink.next_ms) {
-        blink.start_ms = now_ms;
-      }
-
-      const blink_elapsed = blink.start_ms < 0 ? blink_ms : now_ms - blink.start_ms;
-
-      if (blink.start_ms >= 0 && blink_elapsed >= blink_ms) {
-        // A doubled blink never chains into a third.
-        blink.doubled = !blink.doubled && Math.random() < 0.15;
-        blink.next_ms =
-          now_ms +
-          (blink.doubled ? double_blink_gap_ms : next_blink_gap_ms(props.mood));
-        blink.start_ms = -1;
-      }
-
-      const openness =
-        blink_elapsed >= blink_ms
-          ? 1
-          : 1 - Math.sin(Math.PI * (blink_elapsed / blink_ms));
-      const eye_ry = (
-        eye_ry_closed +
-        (eye_ry_open - eye_ry_closed) * openness
-      ).toFixed(1);
-
-      if (eye_ry !== last_eye_ry_ref.current) {
-        eye_left.setAttribute("ry", eye_ry);
-        eye_right.setAttribute("ry", eye_ry);
-        last_eye_ry_ref.current = eye_ry;
-      }
-
-      const next_brow = `translate(0 ${(-5 * level).toFixed(1)})`;
-
-      if (next_brow !== last_brow_ref.current) {
-        brow_motion.setAttribute("transform", next_brow);
-        last_brow_ref.current = next_brow;
-      }
+      frame = window.requestAnimationFrame(step);
     };
 
     frame = window.requestAnimationFrame(step);
 
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(wake_timer);
+    };
     // speech_pending is read inside the loop, so it has to be a dependency: the
     // rAF closure is long-lived and a non-dependency prop would stay frozen at
     // mount, making the flicker look intermittent rather than fixed. Rebuilding
     // is free - it already happens on every mood change, and all interpolation
     // state lives in refs.
   }, [props.mood, props.speech_pending, props.read_playback, props.speech_track_ref]);
+
+  // Drift lives outside the loop: a CSS transition on the <svg> element, so
+  // the compositor draws the in-between frames and JS wakes once per move.
+  // Independent of mood - a slow shift reads fine while talking too.
+  useEffect(() => {
+    const svg = svg_ref.current;
+
+    if (svg === null) {
+      throw new Error("face svg was not mounted");
+    }
+
+    if (reduced_motion) {
+      return;
+    }
+
+    let home = { x: 0, y: 0 };
+    let next_relocate_ms = performance.now() + relocate_gap_ms;
+    let timer = 0;
+
+    const move = () => {
+      const now_ms = performance.now();
+      const relocating = now_ms >= next_relocate_ms;
+
+      if (relocating) {
+        home = { x: spread(relocate_reach_x), y: spread(relocate_reach_y) };
+        next_relocate_ms = now_ms + relocate_gap_ms;
+      }
+
+      svg.style.transitionDuration = `${relocating ? relocate_seconds : drift_seconds}s`;
+      svg.style.transform =
+        `translate(${(home.x + spread(drift_reach_x)).toFixed(2)}%, ` +
+        `${(home.y + spread(drift_reach_y)).toFixed(2)}%) ` +
+        `rotate(${spread(drift_reach_degrees).toFixed(2)}deg)`;
+      timer = window.setTimeout(move, drift_gap_min_ms + Math.random() * drift_gap_spread_ms);
+    };
+
+    timer = window.setTimeout(move, drift_gap_min_ms + Math.random() * drift_gap_spread_ms);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return (
     <div className="face_stage_wrap">
@@ -351,6 +558,7 @@ export function face_view(props: face_view_props) {
         aria-label="말하기"
       >
         <svg
+          ref={svg_ref}
           className={`face_svg face_${props.mood}`}
           viewBox="0 0 400 400"
           preserveAspectRatio="xMidYMid meet"
@@ -369,24 +577,27 @@ export function face_view(props: face_view_props) {
             </g>
           </g>
           {/* ry is JS-owned for blinking, so "wide eyes" while listening comes
-              from a CSS scale on this wrapper, never from ry. */}
+              from a CSS scale on this wrapper, never from ry. Gaze is the
+              JS-owned inner group, split off for the same reason as the brows. */}
           <g className="face_eyes">
-            <ellipse
-              ref={eye_left_ref}
-              className="face_ink"
-              cx={138}
-              cy={168}
-              rx={23}
-              ry={eye_ry_open}
-            />
-            <ellipse
-              ref={eye_right_ref}
-              className="face_ink"
-              cx={262}
-              cy={168}
-              rx={23}
-              ry={eye_ry_open}
-            />
+            <g ref={gaze_ref} transform={rest_gaze_transform}>
+              <ellipse
+                ref={eye_left_ref}
+                className="face_ink"
+                cx={138}
+                cy={168}
+                rx={23}
+                ry={eye_ry_open}
+              />
+              <ellipse
+                ref={eye_right_ref}
+                className="face_ink"
+                cx={262}
+                cy={168}
+                rx={23}
+                ry={eye_ry_open}
+              />
+            </g>
           </g>
           <path ref={mouth_ref} className="face_ink face_mouth" d={rest_mouth_d} />
         </svg>
@@ -409,15 +620,17 @@ export function face_view(props: face_view_props) {
 
       {/* Sibling of the face button, not a child: interactive elements cannot
           nest, and hit-testing on a nested one is undefined. */}
-      <button
-        className="face_exit"
-        type="button"
-        onClick={props.on_exit}
-        aria-label="콘솔로 돌아가기"
-      >
-        <PanelsTopLeft size={18} />
-        <span>콘솔</span>
-      </button>
+      {props.on_exit !== null && (
+        <button
+          className="face_exit"
+          type="button"
+          onClick={props.on_exit}
+          aria-label="콘솔로 돌아가기"
+        >
+          <PanelsTopLeft size={18} />
+          <span>콘솔</span>
+        </button>
+      )}
     </div>
   );
 }

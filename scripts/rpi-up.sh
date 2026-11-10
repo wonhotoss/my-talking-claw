@@ -19,10 +19,12 @@
 #     (뇌중심-로드맵.md). tts then runs natively with the env values from tts/docker-compose.yml `piper`.
 #   - agent-gateway runs the day-10 SDK brain with its home in ~/claw-home (AGENT_BRAIN=cli brings back
 #     the per-turn claude -p). The home's .claude/settings.json is the tool policy now.
-#   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/face?role=viewer).
-#   - kiosk: Chromium on labwc/Wayland (day-9.md "키오스크 1단계" for why each flag is there).
-#     --force-prefers-reduced-motion: the face's CSS breathe/ring animations cost 44% CPU at idle on
-#     this Pi (no GPU compositing); with reduced motion Chromium idles at 7% (day-9 cooling test).
+#   - audio: the resident loop (audio/) owns the ReSpeaker; the kiosk is a viewer (#/kiosk is always one).
+#   - kiosk: Chromium on labwc/Wayland (day-9.md "키오스크 1단계" for why each flag is there), at #/kiosk:
+#     the face and its captions, nothing else. The face idles in events (blinks, glances, a slow drift
+#     against burn-in) and costs ~10% of a core like a still face would (day-12; it runs on the GPU -
+#     V3D via ANGLE/GLES). --force-prefers-reduced-motion is no longer passed: it was the day-9 fix
+#     for a continuous CSS animation that no longer exists, and it froze the face (no blinks at all).
 #     Screen blanking (swayidle from ~/.config/labwc/autostart) is stopped while the stack runs and
 #     restarted on `down`; a reboot restores the default by itself.
 set -euo pipefail
@@ -54,8 +56,9 @@ if [ -f "$azure_env" ]; then
   set +a
 fi
 kiosk_profile="$HOME/.config/claw-kiosk"
-# role=viewer: the kiosk draws only; audio/ owns the microphone and the speaker.
-kiosk_url="${KIOSK_URL:-https://localhost:5173/#/face?role=viewer}"
+# The kiosk draws only; audio/ owns the microphone and the speaker. #/face?role=viewer is the same
+# face with the console button, for debugging.
+kiosk_url="${KIOSK_URL:-https://localhost:5173/#/kiosk}"
 playback_gain_db="${AUDIO_PLAYBACK_GAIN_DB:--12}"
 # PortAudio's default output here is the bcm2835 headphone jack; name the ReSpeaker on both sides.
 audio_device="${AUDIO_DEVICE:-ReSpeaker}"
@@ -162,7 +165,7 @@ tmux new-window -t "$session" -n kiosk -c "$HOME"
 tmux send-keys -t "$session:kiosk" \
   "until curl -sk -m 2 -o /dev/null https://127.0.0.1:5173/; do sleep 1; done; \
 LANGUAGE=ko LANG=ko_KR.UTF-8 chromium --kiosk --ozone-platform=wayland --lang=ko --password-store=basic \
---force-prefers-reduced-motion --ignore-certificate-errors --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
+--ignore-certificate-errors --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
 --noerrdialogs --disable-infobars --user-data-dir=$kiosk_profile '$kiosk_url' 2>&1 | grep -v -E '^\\[|GPU|dbus'" C-m
 
 tmux new-window -t "$session" -n shell -c "$repo"
