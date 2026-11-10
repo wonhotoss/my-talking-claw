@@ -78,9 +78,11 @@ const double_blink_gap_ms = 190;
 
 // Gaze, in viewBox units. The eyes take the whole offset and the brows a
 // fraction of it, which reads as a slight turn of the head rather than as
-// eyeballs sliding inside a fixed face.
+// eyeballs sliding inside a fixed face. Vertical 10 (2026-11-11, the user
+// asked for more): up, the eye still clears the following brow by ~14 units;
+// down, it stops just short of the cheeks.
 const glance_reach_x = 11;
-const glance_reach_y = 6;
+const glance_reach_y = 10;
 const brow_gaze_follow = 0.4;
 // A saccade: quick to move, then perfectly still until the next glance, so a
 // resting gaze writes nothing.
@@ -98,8 +100,9 @@ const drift_reach_y = 1.0;
 const drift_reach_degrees = 1.2;
 const drift_seconds = 1.6;
 const relocate_gap_ms = 10 * 60_000;
-// The 800x480 kiosk has 160 px free on either side of the 480 px face, and
-// ~26 px above and below the ring.
+// On the 800x480 kiosk the face box is ~450 px wide (viewBox 280 units at
+// 1.6 px), leaving ~175 px on either side; vertically the thinking brow and
+// the widest viseme sit ~15 px inside the stage.
 const relocate_reach_x = 6;
 const relocate_reach_y = 1.5;
 const relocate_seconds = 4;
@@ -110,6 +113,15 @@ const gaze_settled = 0.05;
 // Timers fire a little early now and then; wake just after the event is due.
 const wake_margin_ms = 5;
 
+// The drawing is in a 400x400 space, but the parts only use the middle of it.
+// The viewBox crops to what moves - the thinking brow (~91), the gaze reach,
+// the drift - so the face is drawn as large as the stage allows (2026-11-11:
+// ~1.33x on the kiosk). It starts at y 68 rather than 80 so the face sits a
+// little lower: centred in the stage above the caption lane it read as pushed
+// up (user, same day). The widest viseme's lower lip (~322) then reaches ~4
+// units past the bottom, into the 8 px gap above the caption, never the text.
+// Nothing that reaches past the box is clipped: .face_svg has overflow: visible.
+const face_view_box = "60 68 280 250";
 const rest_mouth_d = mouth_path(mood_shapes.idle);
 const rest_brow_transform = "translate(0 0)";
 const rest_gaze_transform = "translate(0 0)";
@@ -123,7 +135,7 @@ type gaze_point = { x: number; y: number };
 // Where the eyes settle when nobody is making them wander: up and aside while
 // thinking, straight ahead otherwise - attentive while listening or talking.
 function rest_gaze(mood: face_mood): gaze_point {
-  return mood === "thinking" ? { x: 9, y: -7 } : { x: 0, y: 0 };
+  return mood === "thinking" ? { x: 9, y: -10 } : { x: 0, y: 0 };
 }
 
 // Idle glances drift around and come back to centre about a third of the time,
@@ -560,11 +572,11 @@ export function face_view(props: face_view_props) {
         <svg
           ref={svg_ref}
           className={`face_svg face_${props.mood}`}
-          viewBox="0 0 400 400"
+          viewBox={face_view_box}
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
         >
-          <circle className="face_ring" cx={200} cy={200} r={178} />
+          <circle className="face_ring" cx={200} cy={205} r={122} />
           <circle className="face_cheek" cx={104} cy={232} r={22} />
           <circle className="face_cheek" cx={296} cy={232} r={22} />
           {/* Two nested groups: CSS owns the outer transform (mood), JS owns

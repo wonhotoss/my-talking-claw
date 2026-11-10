@@ -335,20 +335,27 @@ h1 {
   height: 100%;
 }
 
+/* The bottom padding is the caption's lane: the caption sits 7vh up and a
+   subtitle line is at most 1.7rem x 1.45 line-height (~2.5rem), so the face
+   is laid out above it and the two never overlap, however large the face is
+   drawn. */
 .face_stage {
   display: block;
   width: 100%;
   height: 100%;
-  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  padding: env(safe-area-inset-top) 0 calc(7vh + 2.5rem + 8px + env(safe-area-inset-bottom));
   background: transparent;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* overflow: visible because the viewBox crops tight to the parts (face_view
+   face_view_box); the listening ring's pulse may reach a little past it. */
 .face_svg {
   display: block;
   width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 .face_ink {
