@@ -14,7 +14,10 @@ import { create_speech_queue } from "./speech_queue";
 import type { speech_phase, speech_queue } from "./speech_queue";
 import type { speech_track } from "./speech_track";
 
-type layout_kind = "console" | "face";
+// "face" is the development face: it keeps a way back to the console. "kiosk"
+// is the same face in operation - nothing on screen but the face, since a
+// static button or label left lit 24/7 is the one thing on it that never moves.
+type layout_kind = "console" | "face" | "kiosk";
 
 type timeline_kind = "user" | "agent" | "notice" | "system";
 type timeline_level = "info" | "error";
@@ -45,13 +48,15 @@ const blocked_label = "탭하면 들려드릴게요";
 const offline_label = "서버 연결 끊김";
 
 // offline_label sits below turn_label so a momentary reconnect does not nag in
-// the middle of a turn.
+// the middle of a turn. rest_label is what to show when nothing is happening:
+// the kiosk shows nothing at all there.
 function pick_status_label(
   permission: mic_permission,
   mic: mic_phase,
   speech: speech_phase,
   turn_label: string,
   stream: "connecting" | "open" | "closed",
+  rest_label: string,
 ): string {
   return permission === "denied"
     ? denied_label
@@ -69,7 +74,7 @@ function pick_status_label(
                 ? turn_label
                 : stream === "closed"
                   ? offline_label
-                  : waiting_label;
+                  : rest_label;
 }
 
 // The mic is only locked out while the recording is being transcribed. It stays
@@ -81,7 +86,7 @@ function is_busy(mic: mic_phase): boolean {
 
 // The console is a debug log, and turns can now start with nobody watching (a
 // scheduled announcement on an unattended kiosk), so it is capped rather than
-// grown forever - every append copies the array, and on #/face it is never even
+// grown forever - every append copies the array, and on the face it is never even
 // rendered.
 const max_timeline_entries = 300;
 
@@ -138,9 +143,10 @@ async function transcribe_audio(blob: Blob): Promise<string> {
   return data.text;
 }
 
-// The face view lives at #/face so a Raspberry Pi can boot Chromium straight
-// into it (chromium --kiosk https://.../#/face). The hash is subscribed to
-// rather than mirrored into state — the URL is already the source of truth.
+// The face lives at #/kiosk so a Raspberry Pi can boot Chromium straight into
+// it (chromium --kiosk https://.../#/kiosk); #/face is the same face with a way
+// back to the console. The hash is subscribed to rather than mirrored into
+// state — the URL is already the source of truth.
 function subscribe_hash(on_change: () => void): () => void {
   window.addEventListener("hashchange", on_change);
 
@@ -149,6 +155,10 @@ function subscribe_hash(on_change: () => void): () => void {
 
 function read_hash(): string {
   return window.location.hash;
+}
+
+function pick_layout(hash: string): layout_kind {
+  return hash === "#/kiosk" ? "kiosk" : hash === "#/face" ? "face" : "console";
 }
 
 // Builds a short silent WAV blob URL, played once inside a tap gesture to
@@ -552,9 +562,16 @@ export function app_shell() {
 
   const hash = useSyncExternalStore(subscribe_hash, read_hash);
   const stream = useSyncExternalStore(subscribe_stream_status, read_stream_status);
-  const layout: layout_kind = hash === "#/face" ? "face" : "console";
+  const layout = pick_layout(hash);
   const mood = pick_mood(permission, mic_phase, speech, turn_label !== "");
-  const status_label = pick_status_label(permission, mic_phase, speech, turn_label, stream);
+  const status_label = pick_status_label(
+    permission,
+    mic_phase,
+    speech,
+    turn_label,
+    stream,
+    layout === "kiosk" ? "" : waiting_label,
+  );
 
   // The console body is wrapped in a single fragment so that both layouts
   // render exactly two children, [branch, audio]. React reconciles by
@@ -564,8 +581,8 @@ export function app_shell() {
   // silent TTS on iOS. Do not flatten this, and do not add a sibling here:
   // every new console element belongs inside the fragment.
   return (
-    <main className={layout === "face" ? "face_root" : "app_shell"}>
-      {layout === "face" ? (
+    <main className={layout === "console" ? "app_shell" : "face_root"}>
+      {layout !== "console" ? (
         createElement(face_view, {
           mood,
           status_label,
@@ -573,9 +590,12 @@ export function app_shell() {
           speech_track_ref,
           speech_pending: speech !== "idle",
           on_tap: () => void handle_mic_click(),
-          on_exit: () => {
-            window.location.hash = "";
-          },
+          on_exit:
+            layout === "face"
+              ? () => {
+                  window.location.hash = "";
+                }
+              : null,
         })
       ) : (
         <>

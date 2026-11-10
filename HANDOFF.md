@@ -110,7 +110,7 @@ TTS를 1코어에 묶어도 실시간 이하인지(`--cpus=1`, platform-notes "�
 chromium --kiosk --ignore-certificate-errors \
   --autoplay-policy=no-user-gesture-required \
   --use-fake-ui-for-media-stream \
-  https://localhost:5173/#/face
+  https://localhost:5173/#/kiosk
 ```
 `--autoplay-policy`는 README에 있는 필수 플래그(예약 발화). `--use-fake-ui-for-media-stream`은 마이크 권한 프롬프트를 자동 승인한다(무인 부팅에 탭할 사람이 없다). 여기서 day-5·7이 미룬 **프레임 예산**(TTS 1코어 묶은 상태의 얼굴 60fps, 수다스러운 `notice` 때 리렌더 3배)을 잰다. Chromium 0.4~0.7GB가 메모리 예산에 들어온다.
 

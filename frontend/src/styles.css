@@ -531,8 +531,31 @@ h1 {
   }
 }
 
+/* A slow head sway on the individual rotate/translate properties, so it
+   composes with the breathing transform instead of replacing it, and stays just
+   as composited. 13s against 4.2s never lines up, so the two never fall into
+   an obvious loop. Pivots low, roughly where a neck would be. */
+@keyframes face_sway {
+  0%,
+  100% {
+    rotate: 0deg;
+    translate: 0 0;
+  }
+  30% {
+    rotate: -1.6deg;
+    translate: -5px 0;
+  }
+  70% {
+    rotate: 1.4deg;
+    translate: 4px 0;
+  }
+}
+
 .face_svg {
-  animation: face_breathe 4.2s ease-in-out infinite;
+  transform-origin: 50% 72%;
+  animation:
+    face_breathe 4.2s ease-in-out infinite,
+    face_sway 13s ease-in-out infinite;
 }
 
 /* Lip-sync itself stays on: it is functional (it says the device is talking),
