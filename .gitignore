@@ -9,3 +9,4 @@ tts/voices/
 voice/models/
 scripts/azure-probe/out/
 scripts/azure-probe/.env
+scripts/face-bench/out/
