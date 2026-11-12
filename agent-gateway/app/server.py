@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app import home_history
 from app.claude_agent import agent_line, claude_agent
 from app.scheduler import scheduler
 
@@ -70,11 +71,17 @@ async def lifespan(_: FastAPI):
     push_token = os.environ.get("DEVICE_PUSH_TOKEN", "")
 
     if brain_kind == "sdk" and push_url != "" and push_token != "":
+        home = Path(os.environ["BRAIN_HOME"]).resolve()
+
         async with httpx.AsyncClient() as http:
             task = asyncio.create_task(
-                scheduler(Path(os.environ["BRAIN_HOME"]), push_url, push_token, http).run(
-                    schedule_poll_seconds
-                )
+                scheduler(
+                    home,
+                    push_url,
+                    push_token,
+                    http,
+                    lambda summary: home_history.record_quietly(home, summary, "scheduler"),
+                ).run(schedule_poll_seconds)
             )
 
             try:

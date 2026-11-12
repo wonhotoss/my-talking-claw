@@ -33,10 +33,25 @@ def test_push_bodies_match_the_backend_contract() -> None:
     assert push_body(prompt) == {"source": "agent", "prompt": "알려줘", "utterances": None}
 
 
+recorded: list[str] = []
+
+
 def make_scheduler(home: Path, handler) -> scheduler:
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
-    return scheduler(home, "http://backend/api/push", "tok", http)
+    return scheduler(home, "http://backend/api/push", "tok", http, recorded.append)
+
+
+def test_every_move_is_recorded(tmp_path: Path) -> None:
+    recorded.clear()
+    write(tmp_path, "a.json", {"at": "2026-11-01T15:14:00+09:00", "say": "지났어요"})
+    write(tmp_path, "b.json", {"at": "not a time", "say": "x"})
+
+    asyncio.run(make_scheduler(tmp_path, lambda request: httpx.Response(202)).tick(
+        datetime.datetime(2026, 11, 1, 15, 14, 1, tzinfo=seoul)
+    ))
+
+    assert recorded == ["스케줄러: a.json → done/", "스케줄러: b.json → failed/"]
 
 
 def write(home: Path, name: str, payload: dict) -> Path:

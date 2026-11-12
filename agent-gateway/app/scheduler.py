@@ -17,6 +17,7 @@ import asyncio
 import datetime
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,16 +64,27 @@ def log(message: str) -> None:
 
 
 class scheduler:
-    def __init__(self, home: Path, push_url: str, push_token: str, http: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        home: Path,
+        push_url: str,
+        push_token: str,
+        http: httpx.AsyncClient,
+        record: Callable[[str], object],
+    ) -> None:
         self.directory = home / "schedule"
         self.push_url = push_url
         self.push_token = push_token
         self.http = http
+        # Called with a summary after every move, so the home's history shows
+        # what fired and what was rejected (home_history.py).
+        self.record = record
 
     def move(self, path: Path, bucket: str) -> None:
         target = self.directory / bucket
         target.mkdir(parents=True, exist_ok=True)
         path.rename(target / path.name)
+        self.record(f"스케줄러: {path.name} → {bucket}/")
 
     async def fire(self, entry: schedule_entry) -> None:
         response = await self.http.post(

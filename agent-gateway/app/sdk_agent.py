@@ -5,17 +5,23 @@ code. Everything about who the brain is lives in its home directory, which the
 operator edits with Claude Code itself:
 
     <BRAIN_HOME>/
-      CLAUDE.md             persona, speech rules, family facts, file conventions
+      CLAUDE.md             operating rules, speech rules, file conventions (brain may edit)
+      system.md             map of the whole device: what it can and cannot do (brain may edit)
+      persona.md, memory.md who it is, what it remembers (brain edits by voice)
+      host.json             optional host knobs, e.g. the wait notice (brain may edit)
+      requests.md           what the brain asks the operator for (brain writes)
       system-prompt.md      optional; replaces the minimal default system prompt
-      .claude/settings.json model, permission mode, allow/deny rules
-      memory.md             long-term facts the brain edits itself
+      .claude/settings.json model, permission mode, allow/deny rules - the brain
+                            can read it, never write it (the one hard layer)
       schedule/*.json       things to say or do later (scheduler.py fires them)
       session.json          runtime: the session id, so a restart resumes
+      .git/                 home_history.py: every change committed by the host
 
 This module only hosts: it keeps the session alive across turns (no per-turn
 process spawn), stamps each message with the current time (the model has no
-clock), translates the SDK's messages into the gateway's NDJSON lines, and turns
-a client disconnect into an interrupt rather than a kill.
+clock), translates the SDK's messages into the gateway's NDJSON lines, turns
+a client disconnect into an interrupt rather than a kill, and commits what a
+turn changed in the home.
 """
 
 import asyncio
@@ -39,6 +45,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
+from app import home_history
 from app.claude_agent import agent_line
 from app.sentences import sentence_splitter
 
@@ -289,6 +296,7 @@ class sdk_agent:
             raise FileNotFoundError(f"BRAIN_HOME has no CLAUDE.md: {self.home}")
 
         require_trusted_home(self.home)
+        home_history.ensure(self.home)
 
     def strip_nesting_markers(self) -> None:
         # The CLI refuses to nest inside another Claude Code session; these are
@@ -356,6 +364,13 @@ class sdk_agent:
                 log("turn cancelled by the client; interrupting")
                 await asyncio.shield(self.interrupt_and_drain(client))
                 raise
+            finally:
+                # Whatever the turn changed in the home, finished or interrupted,
+                # with its words as the reason. Off the event loop: git is a
+                # subprocess.
+                await asyncio.shield(
+                    asyncio.to_thread(home_history.record_quietly, self.home, f"턴: {message}", "brain")
+                )
 
     async def observe(self, messages: AsyncIterator[object]) -> AsyncIterator[object]:
         """Pass-through that logs the init and result and persists the session id."""

@@ -6,11 +6,10 @@
       "WebSearch",
       "WebFetch",
       "Read",
-      "Edit(persona.md)",
-      "Edit(memory.md)",
-      "Edit(schedule/*)"
+      "Edit(/**)"
     ],
     "deny": [
+      "Edit(/.claude/**)",
       "Bash",
       "Task",
       "NotebookEdit",
