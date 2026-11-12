@@ -14,7 +14,7 @@
 - **AEC 없음.** ReSpeaker Lite USB 펌웨어 2.0.5의 AEC는 실측상 작동 안 함(재생 중 녹음을 STT가 그대로 받아씀). 사용자 결정: **추후 과제, 검증된 기기로 재시도.** 재생 중 웨이크워드(barge-in)는 임계 0.2로 best-effort — 실측 점수 0.24. 소프트웨어 AEC는 루프가 재생 PCM을 쥐고 있어 이제 가능(미착수).
 - **열은 해결됐다(day 11, 2026-11-08).** 30mm 팬 5V + 구리 방열판 장착 뒤 전체 스택 유휴 **37~40°C**, STT 4회 연속 최고 **52°C**, 스로틀 비트 없음(전: 72~74 / 84°C). 팬 소음은 마이크 RMS -43 dBFS, "알렉사" 7/7. 온도 연동 팬·아머 케이스 불필요. 수치: [day-11.md](day-11.md).
 - 테스트: backend 63 / agent-gateway 19 / voice 7 / tts 65 / **audio 30** / frontend `tsc` 통과.
-- **RPi 동기화는 git bundle.** 데스크탑에서 커밋 → `git bundle create` → scp → RPi에서 `git fetch <bundle> main && git merge --ff-only FETCH_HEAD`(푸시 없이). RPi 작업 트리는 깨끗하다(`stash@{0}`에 옛 rpi-up.sh 복사본만).
+- **RPi 동기화는 공개 저장소 pull.** 편집·커밋·push는 데스크탑(또는 클라우드 세션)에서만 → RPi는 `git pull --ff-only origin main`(인증 없이, 저장소가 공개). **RPi는 GitHub 자격증명을 갖지 않는다**(2026-11-12 `gh auth logout` + `~/.gitconfig`의 gh 자격증명 도우미 제거 — 뇌가 읽을 수 있는 비밀을 하나 줄였다, [뇌-상호작용-로드맵.md](뇌-상호작용-로드맵.md) 3절). RPi에서 push는 실패한다(의도). 저장소가 비공개가 되면 데스크탑이 SSH로 RPi에 직접 밀어 넣는다(git bundle 또는 `rpi` remote). GitHub 서버 쪽 토큰 철회(Authorized OAuth Apps → GitHub CLI)는 사용자가 나중에 — 철회하면 데스크탑 `gh` 로그인도 풀린다.
 - **RPi CLI 로그인이 만료된다.** 11-08에 일주일 방치 뒤 "OAuth session expired and could not be refreshed" — 두뇌가 그 문장을 그대로 읽었다. 관리자가 RPi에서 `claude` → `/login`. 장기 토큰(`claude setup-token`) 전환은 day-11 미룬 개선.
 
 ### 턴 한 번의 실측 (day-9 14:10, 80°C — day-11에서 45°C·SDK 상주로 ~14.5s, 분해는 day-11.md)
@@ -68,7 +68,7 @@
 - 이전 함정(day 8까지)은 day-8.md·README에 그대로.
 
 ## 저장소 / RPi
-- GitHub `origin` (`wonhotoss/my-talking-claw`). RPi는 clone이 있고 `~/Documents/my-talking-claw`. 동기화 절차는 위 "커밋 안 됨".
+- GitHub `origin` (`wonhotoss/my-talking-claw`, **공개**). RPi는 clone이 있고 `~/Documents/my-talking-claw`, pull 전용(자격증명 없음). 동기화 절차는 위 "RPi 동기화".
 - RPi 작업 디렉터리: `~/respeaker-test`(day-9 측정 wav·스크린샷), `~/respeaker-fw`(후보 펌웨어 3개, 미플래시), `~/claw-recordings`(루프가 남기는 발화 녹음), `~/claw-home`(에이전트 빈 workdir).
 
 ## 서브트랙: clova-track/ (대기)
