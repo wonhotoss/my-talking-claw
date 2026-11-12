@@ -134,3 +134,25 @@ def test_ink_keeps_its_colour_and_paper_turns_clear(example_parts) -> None:
     assert (image[..., 3] == 0).any()
     # The photo's lamp is warm and uneven; the paper model divides both out.
     assert np.abs(image[solid][:, :3].mean(axis=0) - ink_bgr).max() < 25
+
+
+def bgr_hue(color: np.ndarray) -> float:
+    import cv2
+
+    return float(cv2.cvtColor(color.reshape(1, 1, 3).astype(np.float32), cv2.COLOR_BGR2HSV)[0, 0, 0])
+
+
+def test_black_ink_glows_in_the_face_ink_colour() -> None:
+    black_and_grey = np.array([[[0.1, 0.1, 0.1], [0.45, 0.43, 0.44]]])
+
+    assert np.allclose(extract.glow(black_and_grey), extract.glow_bgr, atol=1e-6)
+
+
+def test_coloured_ink_keeps_its_hue_and_is_lifted() -> None:
+    # Dark brown, deep red, navy: each must stay itself, only brighter.
+    inks = np.array([[[0.12, 0.25, 0.42], [0.10, 0.10, 0.70], [0.45, 0.15, 0.10]]])
+    glowing = extract.glow(inks)
+
+    for before, after in zip(inks[0], glowing[0]):
+        assert after.max() == pytest.approx(extract.glow_min_value, abs=1e-3)
+        assert bgr_hue(after) == pytest.approx(bgr_hue(before), abs=1.0)

@@ -5,7 +5,8 @@
 Each photo may show any page (or several) in any order and at an angle; the
 corner markers say which page it is and how to flatten it. A later photo of
 the same page replaces the earlier one. Out come transparent PNGs, one per
-drawn cell, the child's colours kept, plus parts.json with where each one sits
+drawn cell - the child's colours kept, black lines turned into the face's
+glowing ink so they read on the dark screen - plus parts.json with where each one sits
 on the face, and preview.png - the parts assembled into a few faces - to check
 the result at a glance.
 """
@@ -18,7 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from sheet import layout
+from sheet import current_face, layout
 from sheet.layout import face_box, mm_rect, placed_cell
 
 
@@ -44,6 +45,16 @@ paper_sample_step_mm = 4.0
 paper_sample_window_px = 9
 # Keep clear of printed things (borders, ticks, labels, markers) by this much.
 paper_clearance_mm = 5.0
+
+# The face lives on a dark screen (styles.css .face_root), where a child's
+# black marker would vanish. So colourless ink - black, grey, pencil - becomes
+# the face's own glowing ink, and coloured ink keeps its hue but is lifted to
+# at least this brightness. Chroma (max - min channel) below the low edge is
+# fully colourless; the blend fades out by the high edge.
+glow_bgr = np.array(current_face.ink_rgb[::-1])
+glow_chroma_low = 0.08
+glow_chroma_high = 0.25
+glow_min_value = 0.85
 
 
 @dataclass(frozen=True)
@@ -223,7 +234,18 @@ def ink_layers(page: np.ndarray, paper: np.ndarray, rect: mm_rect) -> tuple[np.n
     safe_alpha = np.maximum(alpha, 1e-3)[..., None]
     color = np.clip((seen - (1 - alpha[..., None])) / safe_alpha, 0, 1)
 
-    return color, alpha
+    return glow(color), alpha
+
+
+def glow(color: np.ndarray) -> np.ndarray:
+    """Ink seen on paper -> ink that reads on the dark screen (BGR, 0..1)."""
+    chroma = color.max(axis=2) - color.min(axis=2)
+    colourless = np.clip((glow_chroma_high - chroma) / (glow_chroma_high - glow_chroma_low), 0, 1)[..., None]
+    hsv = cv2.cvtColor(color.astype(np.float32), cv2.COLOR_BGR2HSV)
+    hsv[..., 2] = np.maximum(hsv[..., 2], glow_min_value)
+    lifted = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR).astype(np.float64)
+
+    return colourless * glow_bgr + (1 - colourless) * lifted
 
 
 def trimmed_part(key: str, color: np.ndarray, alpha: np.ndarray, area: face_box) -> tuple[part, np.ndarray] | None:
@@ -339,16 +361,17 @@ preview_faces = (
 preview_origin = (50.0, 58.0)
 preview_size_units = (300, 270)
 preview_scale = 1.6
-preview_paper_bgr = (0.93, 0.95, 0.96)
+# The face screen's background, styles.css .face_root (#10171c).
+preview_background_bgr = (0x1C / 255, 0x17 / 255, 0x10 / 255)
 
 
 def preview(parts: dict[str, tuple[part, np.ndarray]]) -> np.ndarray:
-    """The faces side by side on a light background. Missing parts are skipped."""
+    """The faces side by side on the screen's background. Missing parts are skipped."""
     width = round(preview_size_units[0] * preview_scale)
     height = round(preview_size_units[1] * preview_scale)
 
     def face(keys: tuple[str, ...]) -> np.ndarray:
-        canvas = np.ones((height, width, 3)) * np.array(preview_paper_bgr)
+        canvas = np.ones((height, width, 3)) * np.array(preview_background_bgr)
 
         for key in (key for key in keys if key in parts):
             found, image = parts[key]
