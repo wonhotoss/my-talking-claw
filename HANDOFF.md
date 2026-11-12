@@ -20,6 +20,8 @@
 ### 턴 한 번의 실측 (day-9 14:10, 80°C — day-11에서 45°C·SDK 상주로 ~14.5s, 분해는 day-11.md)
 말 끝 → 엔드포인트 0.7s → STT 5.9s → 포스트 → 첫 소리 13.5s(= `claude -p` 스폰 **6.5s** + 에이전트 2.7s + 첫 문장 TTS 2.8s) → 6문장 24초 재생. **말 끝에서 첫 소리까지 ~20s.** 분해와 줄일 곳은 day-9.md "여섯 번째".
 
+> **2026-11-12 뇌 권한**([day-13.md](day-13.md)): 뇌는 기기 전체를 읽고, 집(`~/claw-home`) 안은 `.claude/settings.json`만 빼고 전부 고친다 — 자기 운영 규칙(`CLAUDE.md`)·`host.json`·새 시스템 지도 `system.md`까지. 못 하는 변경은 `requests.md`로 관리자에게. 금지 대신 기록: 게이트웨이가 집을 git으로 커밋(`git -C ~/claw-home log -p`, 되돌리기는 `git revert`). 원칙은 "불필요한 금지는 만들지 않는다"([뇌-상호작용-로드맵.md](뇌-상호작용-로드맵.md) 3-1).
+
 ## day 10 상태 (2026-11-01 저녁, 데스크탑에서 구현·실기 완료, RPi 미전환)
 - **설계**: [brain-memo.txt](brain-memo.txt)(사용자) → [day-10.md](day-10.md). 두뇌 계층 = **뇌의 집**(Claude Code 프로젝트 디렉터리, 관리자 설정: CLAUDE.md·settings.json·memory.md·schedule/) + 코드는 호스트와 호출 규약만. 단단한 층(권한·모델·스케줄 검증, 호스트 집행)과 무른 층(문서, 모델이 따르는 만큼).
 - **구현**: `agent-gateway/app/sdk_agent.py`(Agent SDK 상주 세션, resume, 시각 스탬프, interrupt), `scheduler.py`(`schedule/*.json` → `/api/push`), `AGENT_BRAIN=sdk|cli`(기본 `cli`), 템플릿 `brain-home.example/`. 테스트 31개.
@@ -83,6 +85,7 @@
 | [day-10.md](day-10.md) | 두뇌 계층: 뇌의 집(관리자 설정) + Agent SDK 상주 세션, 스케줄, 문장 단위 선출력 |
 | [day-11.md](day-11.md) | 쿨러 장착 Q&A와 실측(온도·팬 소음·웨이크워드), 로그인 만료, Azure STT·TTS 전환과 실기(~3.3 s) |
 | [day-12.md](day-12.md) | 얼굴 idle 비용 실측(GPU 확인, 기법별·dev/빌드·브랜치), 이벤트 idle 설계·구현, `#/kiosk` 운용 모드, 이미지 파츠 규격 |
+| [day-13.md](day-13.md) | 뇌 권한: 비밀·root·자기 규칙 결정(불필요한 금지는 만들지 않는다), GitHub 토큰 제거, `settings.json`만 절대 금지 + 집의 git 기록, 실측 |
 | [얼굴-설계.md](얼굴-설계.md) | **얼굴 설계**: 라우트×역할, SVG 구조와 소유 규칙, mood 5종, 립싱크·자막, 이벤트 idle, 성능 계약, 직접 그린 파츠로 갈 때 |
 | [README.md](README.md) | 각 서비스 실행법·env 표·이벤트 계약(day-9 이벤트 3종, `audio/` 절 포함)·검증. **명령은 여기가 원본** |
 | [agent-latency-notes.md](agent-latency-notes.md) | 에이전트 홉 분해·기각된 가설·지연 조사 런북 |
