@@ -63,7 +63,9 @@ playback_gain_db="${AUDIO_PLAYBACK_GAIN_DB:--12}"
 # PortAudio's default output here is the bcm2835 headphone jack; name the ReSpeaker on both sides.
 audio_device="${AUDIO_DEVICE:-ReSpeaker}"
 audio_dump_dir="${AUDIO_DUMP_DIR:-$HOME/claw-recordings}"
-wake_word_model="${WAKE_WORD_MODEL:-hey_jarvis,alexa,hey_mycroft}"
+# The wake word is the brain's name (2026-11-13): one word, changed only by the administrator,
+# together with the name in the brain home's persona.md.
+wake_word_model="${WAKE_WORD_MODEL:-alexa}"
 
 health() {
   for pair in "backend http://127.0.0.1:8000/health" \

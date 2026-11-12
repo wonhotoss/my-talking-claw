@@ -9,8 +9,9 @@ Configuration (all optional; defaults are the single-RPi layout of rpi-up.sh):
   AUDIO_OUTPUT_RATE                   16000 (the ReSpeaker's USB firmware is fixed there)
   AUDIO_OUTPUT_CHANNELS               2
   AUDIO_PLAYBACK_GAIN_DB              -12 (day-9: the user's "enough" level, and below mic saturation)
-  WAKE_WORD_MODEL                     hey_jarvis,alexa,hey_mycroft - comma-separated openWakeWord stock
-                                      models, any of them wakes the device (placeholders, see wake_word.py)
+  WAKE_WORD_MODEL                     alexa - comma-separated openWakeWord stock models, any of them wakes
+                                      the device. One word since 2026-11-13: the wake word is the brain's
+                                      name (brain-home persona.md), changed only by the administrator
   WAKE_WORD_THRESHOLD                 0.5
   WAKE_WORD_THRESHOLD_WHILE_SPEAKING  0.2 (barge-in without AEC: day-9 live, the user over our TTS
                                       peaked at 0.24 while our TTS alone peaked at 0.00)
@@ -111,7 +112,7 @@ def main() -> None:
     loop = audio_loop(
         client=client,
         source=microphone(device_from_env("AUDIO_INPUT_DEVICE"), capture_rate, capture_frame_samples),
-        wake=openwakeword_detector(env("WAKE_WORD_MODEL", "hey_jarvis,alexa,hey_mycroft").split(",")),
+        wake=openwakeword_detector(env("WAKE_WORD_MODEL", "alexa").split(",")),
         make_vad=lambda: silero_vad(vad_threshold),
         sink=portaudio_sink(
             device_from_env("AUDIO_OUTPUT_DEVICE"),
@@ -125,7 +126,7 @@ def main() -> None:
     # kill -USR1 <pid> prints every thread's stack to stderr: the cheap way to see
     # what a hot thread is doing.
     faulthandler.register(signal.SIGUSR1, all_threads=True)
-    log(f"ready: wake words {env('WAKE_WORD_MODEL', 'hey_jarvis,alexa,hey_mycroft')}, gain {settings.playback_gain_db}dB, stt {env('STT_ENGINE', 'whisper')}")
+    log(f"ready: wake words {env('WAKE_WORD_MODEL', 'alexa')}, gain {settings.playback_gain_db}dB, stt {env('STT_ENGINE', 'whisper')}")
     loop.run()
 
 
