@@ -106,13 +106,17 @@ def row(person: str, kind: str, number: int, distance: str, loudness: str, inton
 def wake_rows(person: str) -> list[dict[str, str]]:
     """distance x loudness x background (18 conditions) x intonation (3) = 54.
     (condition + intonation) % 3 == 0 is test: one test take per condition and
-    six per intonation."""
+    six per intonation. The session alternates over distance x loudness, not
+    over background or intonation - otherwise a whole (background, intonation)
+    pair lands on one day and the two days differ in more than the day."""
     conditions = list(itertools.product(distances, loudnesses, backgrounds))
     pairs = itertools.product(enumerate(conditions), enumerate(intonations))
+    background_count = len(backgrounds)
 
     return [
         row(person, "wake", c * len(intonations) + i, distance, loudness, intonation, background,
-            1 + (c + i) % 2, "test" if (c + i) % 3 == 0 else "train", wake_word)
+            1 + (c // background_count + i + c % background_count) % 2,
+            "test" if (c + i) % 3 == 0 else "train", wake_word)
         for (c, (distance, loudness, background)), (i, intonation) in pairs
     ]
 
@@ -122,10 +126,11 @@ def wake_command_rows(person: str) -> list[dict[str, str]]:
     The third take of each condition is test."""
     conditions = list(itertools.product(distances, backgrounds))
     takes = 3
+    background_count = len(backgrounds)
 
     return [
         row(person, "wake_command", c * takes + t, distance, "normal", "calling", background,
-            1 + (c + t) % 2, "test" if t == takes - 1 else "train",
+            1 + (c // background_count + t + c % background_count) % 2, "test" if t == takes - 1 else "train",
             f"{wake_word} ... {commands[c * takes + t]}")
         for (c, (distance, background)), t in itertools.product(enumerate(conditions), range(takes))
     ]

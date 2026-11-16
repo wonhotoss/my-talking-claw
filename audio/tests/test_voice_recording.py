@@ -60,6 +60,22 @@ def test_wake_takes_cover_every_condition_and_hold_out_one_each() -> None:
     assert Counter(item["session"] for item in wake) == {"1": 27, "2": 27}
 
 
+def test_a_session_is_not_confounded_with_background_or_intonation() -> None:
+    rows = [item for item in checklist.build_rows() if item["person"] == "dad"]
+    wake_pairs = Counter(
+        (item["session"], item["background"], item["intonation"]) for item in rows if item["kind"] == "wake"
+    )
+    command_backgrounds = Counter(
+        (item["session"], item["background"]) for item in rows if item["kind"] == "wake_command"
+    )
+
+    # Every (background, intonation) pair is recorded on both days, 4 or 5 times each.
+    assert len(wake_pairs) == 2 * len(checklist.backgrounds) * len(checklist.intonations)
+    assert set(wake_pairs.values()) == {4, 5}
+    assert set(command_backgrounds.values()) == {4, 5}
+    assert Counter(item["session"] for item in rows if item["kind"] == "wake_command") == {"1": 9, "2": 9}
+
+
 def test_each_question_is_asked_once_per_person() -> None:
     commands = [item["prompt"] for item in checklist.build_rows() if item["person"] == "mom" and item["kind"] == "wake_command"]
 
