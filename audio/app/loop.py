@@ -74,10 +74,12 @@ trim_padding_ms = 300
 
 def chime(sample_rate: int) -> np.ndarray:
     """The "I'm listening" cue. A USB DAC swallows its first ~100ms after the
-    stream opens (day-9: a bare 120ms tone was inaudible), hence the lead-in."""
+    stream opens (day-9: a bare 120ms tone was inaudible), hence the lead-in.
+    -24 dB, not -12 (2026-11-17, the user via requests.md: too loud, startling) -
+    a pure tone at -12 dBFS sits well above speech played at the -12 dB gain."""
     lead_in = np.zeros(int(0.15 * sample_rate), dtype=np.int16)
 
-    return np.concatenate([lead_in, tone(880, 0.2, sample_rate, -12.0)])
+    return np.concatenate([lead_in, tone(880, 0.2, sample_rate, -24.0)])
 
 
 def log(message: str) -> None:
