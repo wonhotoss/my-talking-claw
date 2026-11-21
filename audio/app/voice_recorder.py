@@ -1,5 +1,9 @@
 """Records the family voice checklist (voice_checklist.py), one row at a time.
 
+This is the terminal version; the studio app (voice_studio.py, launched by
+scripts/rpi-record.sh) shows the prompts on the RPi screen and shares
+`recording_device` below.
+
 Run it on the RPi with the audio loop stopped (both want the ReSpeaker), from
 a terminal the operator can see; the person being recorded only listens for
 the beeps:
@@ -206,12 +210,24 @@ def save(root: str, item: dict[str, str], recorded: take | np.ndarray) -> dict[s
     }
 
 
-class session_runner:
-    def __init__(self, path: str, person: str | None, session: str | None) -> None:
-        self.path = path
-        self.root = os.path.dirname(path)
-        self.person = person
-        self.session = session
+def whole_take(recorded: take | np.ndarray) -> np.ndarray:
+    if not isinstance(recorded, take):
+        return recorded
+
+    return np.concatenate([part for part in (recorded.wake, recorded.command) if part is not None])
+
+
+def stops_on_request(item: dict[str, str]) -> bool:
+    """Free talk and the house sound end when the operator says so; the wake
+    kinds end at the endpoint."""
+    return item["kind"] in ("free", "ambient")
+
+
+class recording_device:
+    """The ReSpeaker side, shared by this CLI and the studio app (voice_studio.py):
+    one capture stream for the whole sitting, the cues, one take per row."""
+
+    def __init__(self) -> None:
         self.source = microphone(device_from_env("AUDIO_INPUT_DEVICE"), capture_rate, capture_frame_samples)
         self.sink = portaudio_sink(
             device_from_env("AUDIO_OUTPUT_DEVICE"),
@@ -221,6 +237,14 @@ class session_runner:
         self.playback_gain_db = float(env("AUDIO_PLAYBACK_GAIN_DB", "-12"))
         vad_threshold = float(env("VAD_THRESHOLD", "0.5"))
         self.make_vad = lambda: silero_vad(vad_threshold)
+        # Level of the last frame pulled, for a live meter; it only moves while recording.
+        self.live_dbfs = -90.0
+        self.frames = self.metered()
+
+    def metered(self) -> Iterator[np.ndarray]:
+        for frame in self.source.frames():
+            self.live_dbfs = dbfs(frame)
+            yield frame
 
     def play(self, samples: np.ndarray) -> None:
         self.sink.play(resample(samples, capture_rate, self.sink.sample_rate), threading.Event())
@@ -230,39 +254,6 @@ class session_runner:
         self.play(samples)
         self.source.flush()
 
-    def record(self, frames: Iterator[np.ndarray], item: dict[str, str]) -> take | np.ndarray:
-        self.source.flush()
-        self.cue(ready_cue(self.sink.sample_rate))
-        # The queue overflows while the menu waits (nobody pulls frames); only
-        # drops during the take itself mean lost audio.
-        dropped_before = self.source.dropped
-        recorded = self.record_kind(frames, item)
-
-        if self.source.dropped > dropped_before:
-            print(f"  ! 녹음 중 프레임 {self.source.dropped - dropped_before}개 유실 - 다시 하는 게 좋아요")
-
-        return recorded
-
-    def record_kind(self, frames: Iterator[np.ndarray], item: dict[str, str]) -> take | np.ndarray:
-        if item["kind"] == "wake":
-            return take_wake(frames, self.make_vad)
-
-        if item["kind"] == "wake_command":
-            return take_wake_command(frames, self.make_vad, lambda: self.cue(chime(self.sink.sample_rate)))
-
-        max_seconds = ambient_max_seconds if item["kind"] == "ambient" else free_max_seconds
-        stop = threading.Event()
-        waiter = threading.Thread(target=lambda: (input(), stop.set()), daemon=True)
-        waiter.start()
-        print(f"  녹음 중 - Enter로 끝 (최대 {max_seconds // 60}분)")
-        recorded = record_until_stopped(frames, stop, max_seconds)
-
-        if not stop.is_set():
-            print("  시간이 다 됐어요 - Enter를 누르세요")
-            waiter.join()
-
-        return recorded
-
     def playback(self, recorded: take | np.ndarray) -> None:
         parts = [recorded.wake, recorded.command] if isinstance(recorded, take) else [recorded]
 
@@ -270,10 +261,71 @@ class session_runner:
             if part is not None:
                 self.play(apply_gain(part, self.playback_gain_db))
 
+    def record(self, item: dict[str, str], stop: threading.Event,
+               announce: Callable[[str], None]) -> tuple[take | np.ndarray, int]:
+        """The take and how many frames were lost during it. `announce` hears
+        each cue as it happens ("말하세요", "질문하세요"); `stop` ends free talk
+        and the house sound."""
+        self.source.flush()
+        self.cue(ready_cue(self.sink.sample_rate))
+        # The queue overflows while a menu waits (nobody pulls frames); only
+        # drops during the take itself mean lost audio.
+        dropped_before = self.source.dropped
+        recorded = self.record_kind(item, stop, announce)
+
+        return recorded, self.source.dropped - dropped_before
+
+    def record_kind(self, item: dict[str, str], stop: threading.Event,
+                    announce: Callable[[str], None]) -> take | np.ndarray:
+        if item["kind"] == "wake":
+            announce("말하세요")
+            return take_wake(self.frames, self.make_vad)
+
+        if item["kind"] == "wake_command":
+            def chime_then_ask() -> None:
+                self.cue(chime(self.sink.sample_rate))
+                announce("질문하세요")
+
+            announce("말하세요")
+            return take_wake_command(self.frames, self.make_vad, chime_then_ask)
+
+        max_seconds = ambient_max_seconds if item["kind"] == "ambient" else free_max_seconds
+        announce(f"녹음 중 - 끝나면 끝 (최대 {max_seconds // 60}분)")
+
+        return record_until_stopped(self.frames, stop, max_seconds)
+
+
+class session_runner:
+    """The terminal version: the operator reads the prompts and passes them on."""
+
+    def __init__(self, path: str, person: str | None, session: str | None) -> None:
+        self.path = path
+        self.root = os.path.dirname(path)
+        self.person = person
+        self.session = session
+        self.device = recording_device()
+
+    def record(self, item: dict[str, str]) -> take | np.ndarray:
+        stop = threading.Event()
+        waiter = threading.Thread(target=lambda: (input(), stop.set()), daemon=True)
+
+        if stops_on_request(item):
+            waiter.start()
+
+        recorded, lost = self.device.record(item, stop, lambda text: print(f"  {text}"))
+
+        if stops_on_request(item) and not stop.is_set():
+            print("  시간이 다 됐어요 - Enter를 누르세요")
+            waiter.join()
+
+        if lost > 0:
+            print(f"  ! 녹음 중 프레임 {lost}개 유실 - 다시 하는 게 좋아요")
+
+        return recorded
+
     def run(self) -> None:
         rows = checklist.read_rows(self.path)
         print(checklist.summary(rows))
-        frames = self.source.frames()
         to_do = pending(rows, self.person, self.session)
 
         for position, item in enumerate(to_do, start=1):
@@ -283,20 +335,17 @@ class session_runner:
             answer = input("  Enter=녹음, s=건너뛰기, q=끝 > ").strip()
 
             while answer not in ("s", "q"):
-                recorded = self.record(frames, item)
+                recorded = self.record(item)
 
                 if isinstance(recorded, take) and recorded.problem is not None:
                     print(f"  ! {recorded.problem}")
                     answer = input("  Enter=다시, s=건너뛰기, q=끝 > ").strip()
                 else:
-                    whole = recorded if not isinstance(recorded, take) else np.concatenate(
-                        [part for part in (recorded.wake, recorded.command) if part is not None]
-                    )
-                    print(f"  {level_report(whole)[1]}")
+                    print(f"  {level_report(whole_take(recorded))[1]}")
                     answer = input("  Enter=저장, p=듣기, r=다시, s=건너뛰기, q=끝 > ").strip()
 
                     while answer == "p":
-                        self.playback(recorded)
+                        self.device.playback(recorded)
                         answer = input("  Enter=저장, p=듣기, r=다시, s=건너뛰기, q=끝 > ").strip()
 
                     if answer == "":

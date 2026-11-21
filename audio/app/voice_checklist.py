@@ -33,7 +33,7 @@ intonations = {"calling": "부르듯이", "asking": "묻듯이", "flat": "무심
 backgrounds = {"quiet": "조용히", "music": "음악 틀고"}
 kinds = {
     "wake": '"딸기님"만',
-    "wake_command": '"딸기님" -> 차임 -> 질문',
+    "wake_command": '"딸기님" → 차임 → 질문',
     "free": "자유 발화",
     "ambient": "집 소리 (아무도 부르지 않음)",
 }

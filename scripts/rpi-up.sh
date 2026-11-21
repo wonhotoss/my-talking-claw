@@ -106,6 +106,11 @@ case "${1:-up}" in
   *) echo "usage: $0 [up|health|down]"; exit 2 ;;
 esac
 
+if tmux has-session -t claw-record 2>/dev/null; then
+  echo "the recording studio is running (scripts/rpi-record.sh) and holds the ReSpeaker - run scripts/rpi-record.sh down first" >&2
+  exit 1
+fi
+
 if tmux has-session -t "$session" 2>/dev/null; then
   echo "session '$session' already running — attaching (use '$0 down' to stop)"
   exec tmux attach -t "$session"

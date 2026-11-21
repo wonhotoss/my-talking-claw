@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>녹음 스튜디오</title>
+<style>
+  /* Sized for the RPi's 7" panel (800x480) first; a phone gets the same page. */
+  :root {
+    --bg: #101418;
+    --panel: #1b2229;
+    --text: #f2f4f6;
+    --dim: #8a97a3;
+    --accent: #ff6b81;      /* 딸기 */
+    --ok: #3ccf8e;
+    --warn: #ffc857;
+    --rec: #ff4d4d;
+    --ask: #ff9f43;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Noto Sans CJK KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--panel);
+    font-size: 20px;
+  }
+  header .title { font-weight: 700; }
+  header .progress { flex: 1; height: 10px; background: #2b343d; border-radius: 5px; overflow: hidden; }
+  header .progress div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  header .count { color: var(--dim); min-width: 64px; text-align: right; }
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 12px 16px;
+    text-align: center;
+    min-height: 0;
+  }
+  .kind { color: var(--dim); font-size: 18px; }
+  .prompt { font-size: 88px; font-weight: 800; line-height: 1.1; color: var(--accent); }
+  .prompt.long { font-size: 44px; color: var(--text); }
+  .question { font-size: 40px; font-weight: 700; }
+  .question::before { content: "♪ 다음 "; color: var(--ask); font-size: 24px; vertical-align: middle; }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .chip { background: var(--panel); border-radius: 999px; padding: 6px 16px; font-size: 24px; }
+  .band {
+    width: 100%;
+    max-width: 760px;
+    border-radius: 12px;
+    padding: 12px;
+    font-size: 26px;
+    font-weight: 700;
+    background: var(--panel);
+  }
+  .band.recording { background: var(--rec); }
+  .band.asking { background: var(--ask); color: #1b1200; }
+  .band.review { background: #17392b; color: var(--ok); }
+  .band.problem { background: #3d3112; color: var(--warn); }
+  .meter { width: 100%; max-width: 760px; height: 14px; background: #2b343d; border-radius: 7px; overflow: hidden; }
+  .meter div { height: 100%; background: var(--ok); width: 0; transition: width .1s; }
+  .message { color: var(--dim); font-size: 18px; min-height: 1.2em; }
+  footer { display: flex; gap: 12px; padding: 12px 16px 16px; }
+  button {
+    flex: 1;
+    min-height: 72px;
+    font: inherit;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--panel);
+    border: none;
+    border-radius: 14px;
+  }
+  button.primary { background: var(--accent); color: #2a0008; }
+  button:active { filter: brightness(1.3); }
+  button .key { display: block; font-size: 13px; font-weight: 400; opacity: .6; }
+  .blocks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; width: 100%; max-width: 760px; }
+  .blocks button { min-height: 96px; font-size: 24px; }
+  .blocks button.done { opacity: .4; }
+  .blocks small { display: block; font-size: 18px; font-weight: 400; color: var(--dim); }
+  .hidden { display: none !important; }
+  @media (max-width: 600px) {
+    .prompt { font-size: 64px; }
+    .prompt.long { font-size: 30px; }
+    .question { font-size: 28px; }
+    .blocks { grid-template-columns: repeat(2, 1fr); }
+    button { font-size: 20px; }
+    button .key { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="title" id="title">녹음 스튜디오</span>
+  <span class="progress"><div id="bar"></div></span>
+  <span class="count" id="count"></span>
+</header>
+<main id="main"></main>
+<footer id="footer"></footer>
+<script>
+  // Polls the studio's state and draws it; buttons post actions. All audio work
+  // happens on the RPi, so this page is the same on the panel and on a phone.
+  const main = document.getElementById("main");
+  const footer = document.getElementById("footer");
+  let keys = {};
+  let lastDrawn = "";
+
+  function act(action, extra) {
+    fetch("/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...extra }),
+    });
+  }
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  // [label, key hint, action, primary?]
+  function buttons(list) {
+    footer.replaceChildren();
+    keys = {};
+    for (const [label, key, action, primary] of list) {
+      const button = el("button", primary ? "primary" : "", label);
+      button.append(el("span", "key", key));
+      button.onclick = () => act(action);
+      footer.append(button);
+      keys[key] = action;
+    }
+  }
+
+  function drawChoose(state) {
+    const grid = el("div", "blocks");
+    for (const block of state.blocks) {
+      const button = el("button", block.done === block.total ? "done" : "", block.label);
+      button.append(el("small", "", `${block.done}/${block.total}`));
+      button.onclick = () => act("choose", { session: block.session, person: block.person });
+      grid.append(button);
+    }
+    const total = state.blocks.reduce((sum, block) => sum + block.total, 0);
+    const done = state.blocks.reduce((sum, block) => sum + block.done, 0);
+    main.replaceChildren(el("div", "kind", `녹음할 묶음을 고르세요 · 전체 ${done}/${total}`), grid);
+    buttons([]);
+  }
+
+  function drawItem(state) {
+    const item = state.item;
+    const [word, question] = item.prompt;
+    const nodes = [el("div", "kind", item.kind)];
+    nodes.push(el("div", word.length > 8 ? "prompt long" : "prompt", word));
+    if (question) nodes.push(el("div", "question", question));
+    const chips = el("div", "chips");
+    for (const chip of item.chips) chips.append(el("span", "chip", chip));
+    nodes.push(chips);
+
+    const band = el("div", "band");
+    if (state.phase === "prompt") {
+      band.textContent = "준비되면 녹음을 누르세요";
+    } else if (state.phase === "recording") {
+      band.textContent = state.status;
+      band.classList.add(state.status.startsWith("질문") ? "asking" : "recording");
+    } else if (state.phase === "review") {
+      band.textContent = "잘 들렸어요 - 저장할까요?";
+      band.classList.add("review");
+    } else if (state.phase === "problem") {
+      band.textContent = "다시 해 볼까요?";
+      band.classList.add("problem");
+    }
+    nodes.push(band);
+
+    const meter = el("div", state.phase === "recording" ? "meter" : "meter hidden");
+    const level = el("div");
+    level.id = "level";
+    meter.append(level);
+    nodes.push(meter);
+    nodes.push(el("div", "message", state.message));
+    main.replaceChildren(...nodes);
+
+    if (state.phase === "prompt") {
+      buttons([["녹음", "Space", "record", true], ["건너뛰기", "S", "skip"], ["처음으로", "Esc", "home"]]);
+    } else if (state.phase === "recording") {
+      buttons(item.stops_on_request ? [["끝", "Space", "stop", true]] : []);
+    } else if (state.phase === "review") {
+      buttons([["저장", "Space", "keep", true], ["듣기", "P", "play"], ["다시", "R", "record"], ["건너뛰기", "S", "skip"]]);
+    } else if (state.phase === "problem") {
+      buttons([["다시", "Space", "record", true], ["건너뛰기", "S", "skip"], ["처음으로", "Esc", "home"]]);
+    }
+  }
+
+  function drawFinished(state) {
+    main.replaceChildren(el("div", "prompt", "끝!"), el("div", "message", state.message || "이 묶음을 다 했어요"));
+    buttons([["처음으로", "Space", "home", true]]);
+  }
+
+  function draw(state) {
+    document.getElementById("title").textContent = state.block ? state.block.label : "녹음 스튜디오";
+    document.getElementById("count").textContent = state.block ? `${state.block.done}/${state.block.total}` : "";
+    document.getElementById("bar").style.width = state.block ? `${100 * state.block.done / state.block.total}%` : "0";
+
+    // Redraw only when something but the meter changed, so a tap is not lost
+    // to a button being replaced under the finger.
+    const shape = JSON.stringify({ ...state, live_dbfs: null });
+    if (shape !== lastDrawn) {
+      lastDrawn = shape;
+      if (state.phase === "choose") drawChoose(state);
+      else if (state.phase === "finished") drawFinished(state);
+      else drawItem(state);
+    }
+
+    const level = document.getElementById("level");
+    if (level && state.live_dbfs !== null) {
+      level.style.width = `${Math.max(0, Math.min(100, (state.live_dbfs + 60) / 60 * 100))}%`;
+    }
+  }
+
+  async function poll() {
+    try {
+      const response = await fetch("/state");
+      draw(await response.json());
+      document.body.style.opacity = 1;
+    } catch {
+      document.body.style.opacity = 0.4;   // studio down or restarting
+    }
+    setTimeout(poll, 200);
+  }
+
+  document.addEventListener("keydown", (event) => {
+    const key = event.key === " " || event.key === "Enter" ? "Space"
+      : event.key === "Escape" ? "Esc" : event.key.toUpperCase();
+    if (keys[key]) {
+      event.preventDefault();
+      act(keys[key]);
+    }
+  });
+
+  poll();
+</script>
+</body>
+</html>
